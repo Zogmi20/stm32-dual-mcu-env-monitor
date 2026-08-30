@@ -28,7 +28,7 @@ static uint8_t DHT11_WaitPinLevel(uint32_t level, uint32_t timeout_us)
     uint32_t count = 0;
     while (HAL_GPIO_ReadPin(DHT11_PORT, DHT11_PIN) != level)
     {
-        DWT_Delay_US(1);
+        delay_us(1);
         count++;
         if (count >= timeout_us) return 1;
     }
@@ -50,7 +50,7 @@ static uint8_t DHT11_ReadBit(uint8_t *bit)
     while (HAL_GPIO_ReadPin(DHT11_PORT, DHT11_PIN) == GPIO_PIN_SET)
     {
         high_time++;
-        DWT_Delay_US(1);
+        delay_us(1);
         if (high_time > DHT11_TIMEOUT_US) return 1;
     }
     
@@ -86,14 +86,14 @@ static uint8_t DHT11_ReadOnce(float *temperature, float *humidity)
     HAL_GPIO_WritePin(DHT11_PORT, DHT11_PIN, GPIO_PIN_RESET);
     HAL_Delay(20);
     HAL_GPIO_WritePin(DHT11_PORT, DHT11_PIN, GPIO_PIN_SET);
-    DWT_Delay_US(30);
+    delay_us(30);
     
     // 2. 等待DHT11响应（拉低）
     retry = 0;
     while (HAL_GPIO_ReadPin(DHT11_PORT, DHT11_PIN) == GPIO_PIN_SET)
     {
         retry++;
-        DWT_Delay_US(1);
+        delay_us(1);
         if (retry > DHT11_TIMEOUT_US) return 1;
     }
     
@@ -102,7 +102,7 @@ static uint8_t DHT11_ReadOnce(float *temperature, float *humidity)
     while (HAL_GPIO_ReadPin(DHT11_PORT, DHT11_PIN) == GPIO_PIN_RESET)
     {
         retry++;
-        DWT_Delay_US(1);
+        delay_us(1);
         if (retry > DHT11_TIMEOUT_US) return 1;
     }
     
@@ -111,7 +111,7 @@ static uint8_t DHT11_ReadOnce(float *temperature, float *humidity)
     while (HAL_GPIO_ReadPin(DHT11_PORT, DHT11_PIN) == GPIO_PIN_SET)
     {
         retry++;
-        DWT_Delay_US(1);
+        delay_us(1);
         if (retry > DHT11_TIMEOUT_US) return 1;
     }
     
@@ -153,7 +153,7 @@ uint8_t DHT11_Read(float *temperature, float *humidity)
         }
         
         // 失败后等待一小段时间再重试
-        DWT_Delay_US(100);  // 等待100us
+        delay_us(100); // 等待100us
     }
     
     // 所有重试都失败

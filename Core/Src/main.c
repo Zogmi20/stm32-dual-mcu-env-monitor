@@ -108,11 +108,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
 
-  // HAL_TIM_Base_Start(&htim2);     // ✅启动TIM2定时器，us延时
   // DHT11_Init();                   // ✅DHT11硬件初始化，仅执行一次！！
-  DWT_Init();
+
   
-  // sys_stm32_clock_init(336, 8, 2, 7); /* 设置时钟, 168Mhz */
 
   /* USER CODE END 2 */
 
@@ -133,23 +131,15 @@ int main(void)
     
     /* USER CODE END 2 */
     HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_9);
-    // HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
     // // HAL_Delay(1000);
-    // DWT_Delay_US(1000000);
     delay_us(1000000);
-    // HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
-    // delay_us(100);
-    // DWT_Delay_US(1000);
-    //  HAL_GPIO_WritePin(GPIOG, GPIO_PIN_9, GPIO_PIN_SET);
     printf("Hello World!\r\n");
-    //  uint8_t buf[] = "hello\r\n";
-    //  HAL_UART_Transmit(&huart1, buf, sizeof(buf) - 1, 100);
-    //  delay_us(100);
-    //  DWT_Delay_US(10);
+
+  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+  
   /* USER CODE END 3 */
 }
 
@@ -200,29 +190,7 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-void DWT_Init(void)
-{
-  // 1. 使能DWT跟踪单元（内核调试寄存器）
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
 
-  // 2. 使能CYCCNT计数器
-  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-
-  // 3. 清零计数器（可选）
-  DWT->CYCCNT = 0;
-}
-void DWT_Delay_US(uint32_t us)
-{
-  uint32_t ticks = us * (SystemCoreClock / 1000000);
-  uint32_t start = DWT->CYCCNT;
-
-  printf("start=%lu, ticks=%lu\n", start, ticks); // ← 加这行
-
-  while ((DWT->CYCCNT - start) < ticks)
-    ;
-
-  printf("end=%lu, diff=%lu\n", DWT->CYCCNT, DWT->CYCCNT - start); // ← 加这行
-}
 /* USER CODE END 4 */
 
 /**
