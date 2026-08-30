@@ -1,9 +1,10 @@
 /**
  ****************************************************************************************************
  * @file        delay.c
- ****************************************************************************************************
- * @attention
-
+ * 修改说明
+ * V1.0 20230206
+ * 第一次发布
+ * V1.1 20230225
  * 修改SYS_SUPPORT_OS部分代码, 默认仅支持UCOSII 2.93.01版本, 其他OS请参考实现
  * 修改delay_init不再使用8分频,全部统一使用MCU时钟
  * 修改delay_us使用时钟摘取法延时, 兼容OS
@@ -194,50 +195,59 @@ void delay_ms(uint16_t nms)
  */
 void HAL_Delay(uint32_t Delay)
 {
-    delay_ms(Delay);
+     delay_ms(Delay);
 }
 
 
 
-// void DWT_Init(void)
-// {
-//     // 1. 使能DWT跟踪单元（内核调试寄存器）
-//     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+void DWT_Init(void)
+{
+    // 1. 使能DWT跟踪单元（内核调试寄存器）
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     
-//     // 2. 使能CYCCNT计数器
-//     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    // 2. 使能CYCCNT计数器
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
     
-//     // 3. 清零计数器（可选）
-//     DWT->CYCCNT = 0;
-// }
-// void DWT_Delay_US(uint32_t us)
-// {
-//     // 计算需要延时多少个时钟周期
-//     // SystemCoreClock是CPU主频，如168,000,000
-//     // 除以1,000,000得到1us的时钟周期数 = 168
-//     uint32_t ticks = us * (SystemCoreClock / 1000000);
+    // 3. 清零计数器（可选）
+    DWT->CYCCNT = 0;
+}
+void DWT_Delay_US(uint32_t us)
+{
+   
+    uint32_t ticks = us * (SystemCoreClock / 1000000);
     
-//     // 记录起始计数值
-//     uint32_t start = DWT->CYCCNT;
+    // 记录起始计数值
+    uint32_t start = DWT->CYCCNT;
     
-//     // 等待计数器差值达到ticks
-//     while ((DWT->CYCCNT - start) < ticks);
-// }
+    // 等待计数器差值达到ticks
+    while ((DWT->CYCCNT - start) < ticks);
+}
 
 void delay_us(uint32_t nus)
 {
-    // 防止nus=0死循环
-    if (nus == 0) return;
-    
-    // 启动定时器
-    HAL_TIM_Base_Start(&htim2);
-    
-    // 清零计数器（确保从0开始）
-    __HAL_TIM_SET_COUNTER(&htim2, 0);
-    
-    // 等待计数器达到目标值（32位，不会溢出）
-    while (__HAL_TIM_GET_COUNTER(&htim2) < nus);
-    
-    // 停止定时器
-    HAL_TIM_Base_Stop(&htim2);
+    if (nus == 0)
+        return;
+
+    // 直接用寄存器读取（32位完整值）
+    uint32_t start = TIM2->CNT; // 直接读 CNT 寄存器
+
+    while ((TIM2->CNT - start) < nus);
 }
+
+// void delay_us(uint32_t nus)
+// {
+//     // 防止nus=0死循环
+//     if (nus == 0) return;
+
+//     // 启动定时器
+//     HAL_TIM_Base_Start(&htim2);
+
+//     // 清零计数器（确保从0开始）
+//     __HAL_TIM_SET_COUNTER(&htim2, 0);
+
+//     // 等待计数器达到目标值（32位，不会溢出）
+//     while (__HAL_TIM_GET_COUNTER(&htim2) < nus);
+
+//     // 停止定时器
+//     HAL_TIM_Base_Stop(&htim2);
+// }

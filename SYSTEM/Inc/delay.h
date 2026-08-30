@@ -16,16 +16,16 @@ void delay_ms(uint16_t nms);                /* 延时nms */
 
 
 
-void DWT_Init(void);
-void DWT_Delay_US(uint32_t us);
+// void DWT_Init(void);
+// void DWT_Delay_US(uint32_t us);
 
-//void delay_us(uint16_t us);
 
-//#if (!SYS_SUPPORT_OS)                       /* 没有使用Systick中断 */
-//    void HAL_Delay(uint32_t Delay);         /* HAL库的延时函数，SDIO等需要用到 */
-//#endif
+#if (!SYS_SUPPORT_OS)                       /* 没有使用Systick中断 */
+   void HAL_Delay(uint32_t Delay);         /* HAL库的延时函数，SDIO等需要用到 */
+#endif
 
 #endif
+
 
 
 
