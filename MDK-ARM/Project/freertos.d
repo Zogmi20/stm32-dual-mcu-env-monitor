@@ -47,3 +47,12 @@ project\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
 project\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
 project\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
 project\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
+project\freertos.o: E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin\..\include\string.h
+project\freertos.o: E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin\..\include\stdio.h
+project\freertos.o: ../SYSTEM/Inc/delay.h
+project\freertos.o: ../SYSTEM/Inc/sys.h
+project\freertos.o: ../Drivers/CMSIS/Include/core_cm4.h
+project\freertos.o: ../Core/Inc/tim.h
+project\freertos.o: ../BSP/Inc/dht11.h
+project\freertos.o: ../Core/Inc/gpio.h
+project\freertos.o: ../Core/Inc/usart.h

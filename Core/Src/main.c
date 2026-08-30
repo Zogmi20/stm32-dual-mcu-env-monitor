@@ -28,8 +28,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "delay.h"
-#include "dht11.h"
-#include <stdio.h>
+#include<stdio.h>
 
 extern UART_HandleTypeDef huart1;
 /* USER CODE END Includes */
@@ -108,17 +107,16 @@ int main(void)
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
 
-  // DHT11_Init();                   // ✅DHT11硬件初始化，仅执行一次！！
 
   
 
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in cmsis_os2.c) */
-  // MX_FREERTOS_Init();
+  MX_FREERTOS_Init();
 
-  // /* Start scheduler */
-  // osKernelStart();
+  /* Start scheduler */
+  osKernelStart();
 
   /* We should never get here as control is now taken by the scheduler */
 
@@ -127,13 +125,9 @@ int main(void)
   while (1)
   {
 
+    /* USER CODE BEGIN 2 */
 
-    
     /* USER CODE END 2 */
-    HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_9);
-    // // HAL_Delay(1000);
-    delay_us(1000000);
-    printf("Hello World!\r\n");
 
   }
     /* USER CODE END WHILE */

@@ -25,6 +25,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
+#include <stdio.h>
+#include "delay.h"
+#include "main.h"
+#include "dht11.h"
+#include "usart.h"
 
 /* USER CODE END Includes */
 
@@ -45,7 +51,9 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-
+float g_temperature = 0.0f;
+float g_humidity = 0.0f;
+uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
 /* USER CODE END Variables */
 osThreadId defaultTaskHandle;
 osThreadId Task_DisplayHandle;
@@ -120,7 +128,7 @@ void MX_FREERTOS_Init(void) {
   Task_RS485Handle = osThreadCreate(osThread(Task_RS485), NULL);
 
   /* definition and creation of Task_ReadSensor */
-  osThreadDef(Task_ReadSensor, StartTask_ReadSensor, osPriorityHigh, 0, 256);
+  osThreadDef(Task_ReadSensor, StartTask_ReadSensor, osPriorityHigh, 0, 512);
   Task_ReadSensorHandle = osThreadCreate(osThread(Task_ReadSensor), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
@@ -142,7 +150,9 @@ void StartDefaultTask(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    // HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_9);
+    // printf("Hello World!\r\n");
+    // osDelay(500);
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -193,10 +203,40 @@ void StartTask_RS485(void const * argument)
 void StartTask_ReadSensor(void const * argument)
 {
   /* USER CODE BEGIN StartTask_ReadSensor */
+  float temp = 0.0f, humi = 0.0f;
+  char buffer[64];
+  uint8_t ret;
+  DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
+
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    //================================ DHT11温湿度传感器
+    // ===== 临界区保护 DHT11 读取（禁用任务切换） =====
+    taskENTER_CRITICAL();
+    ret = DHT11_Read(&temp, &humi);
+    taskEXIT_CRITICAL();
+    // =================================================
+
+    if (ret == 0)
+    {
+      g_temperature = temp;
+      g_humidity = humi;
+      g_sensor_ok = 1;
+
+      sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
+      HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
+      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
+    }
+    else
+    {
+      g_sensor_ok = 0;
+      HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
+      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
+    }
+
+    // DHT11要求间隔 >= 1秒，这里用2秒
+    osDelay(2000); // FreeRTOS的延时函数
   }
   /* USER CODE END StartTask_ReadSensor */
 }

@@ -84,10 +84,10 @@ static uint8_t DHT11_ReadOnce(float *temperature, float *humidity)
     
     // 1. 发起启动信号
     HAL_GPIO_WritePin(DHT11_PORT, DHT11_PIN, GPIO_PIN_RESET);
-    HAL_Delay(20);
+    delay_us(20000);
     HAL_GPIO_WritePin(DHT11_PORT, DHT11_PIN, GPIO_PIN_SET);
     delay_us(30);
-    
+
     // 2. 等待DHT11响应（拉低）
     retry = 0;
     while (HAL_GPIO_ReadPin(DHT11_PORT, DHT11_PIN) == GPIO_PIN_SET)
@@ -153,7 +153,7 @@ uint8_t DHT11_Read(float *temperature, float *humidity)
         }
         
         // 失败后等待一小段时间再重试
-        delay_us(100); // 等待100us
+        delay_us(100);  // 等待100us
     }
     
     // 所有重试都失败
