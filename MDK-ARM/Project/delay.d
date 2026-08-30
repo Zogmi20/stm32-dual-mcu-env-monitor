@@ -1,5 +1,5 @@
 project\delay.o: ..\SYSTEM\Src\delay.c
-project\delay.o: ..\SYSTEM\Inc\sys.h
+project\delay.o: ../SYSTEM/Inc/sys.h
 project\delay.o: ../Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f4xx.h
 project\delay.o: ../Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f407xx.h
 project\delay.o: ../Drivers/CMSIS/Include/core_cm4.h
@@ -34,6 +34,6 @@ project\delay.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 project\delay.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 project\delay.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
 project\delay.o: ../Drivers/CMSIS/Include/core_cm4.h
-project\delay.o: ..\SYSTEM\Inc\delay.h
+project\delay.o: ../SYSTEM/Inc/delay.h
 project\delay.o: ../Core/Inc/tim.h
 project\delay.o: ../Core/Inc/main.h

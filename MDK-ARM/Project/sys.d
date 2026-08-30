@@ -1,5 +1,5 @@
 project\sys.o: ..\SYSTEM\Src\sys.c
-project\sys.o: ..\SYSTEM\Inc\sys.h
+project\sys.o: ../SYSTEM/Inc/sys.h
 project\sys.o: ../Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f4xx.h
 project\sys.o: ../Drivers/CMSIS/Device/ST/STM32F4xx/Include/stm32f407xx.h
 project\sys.o: ../Drivers/CMSIS/Include/core_cm4.h

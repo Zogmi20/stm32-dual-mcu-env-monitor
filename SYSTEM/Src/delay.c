@@ -193,10 +193,10 @@ void delay_ms(uint16_t nms)
  * @param       Delay : 要延时的毫秒数
  * @retval      None
  */
-//void HAL_Delay(uint32_t Delay)
-//{
-//     delay_ms(Delay);
-//}
+void HAL_Delay(uint32_t Delay)
+{
+     delay_ms(Delay);
+}
 
 
 
@@ -213,9 +213,7 @@ void DWT_Init(void)
 }
 void DWT_Delay_US(uint32_t us)
 {
-    // 计算需要延时多少个时钟周期
-    // SystemCoreClock是CPU主频，如168,000,000
-    // 除以1,000,000得到1us的时钟周期数 = 168
+   
     uint32_t ticks = us * (SystemCoreClock / 1000000);
     
     // 记录起始计数值
@@ -227,18 +225,12 @@ void DWT_Delay_US(uint32_t us)
 
 void delay_us(uint32_t nus)
 {
-    // 防止nus=0死循环
-    if (nus == 0) return;
-    
-    // 启动定时器
-    HAL_TIM_Base_Start(&htim2);
-    
-    // 清零计数器（确保从0开始）
-    __HAL_TIM_SET_COUNTER(&htim2, 0);
-    
-    // 等待计数器达到目标值（32位，不会溢出）
-    while (__HAL_TIM_GET_COUNTER(&htim2) < nus);
-    
-    // 停止定时器
-    HAL_TIM_Base_Stop(&htim2);
+    if (nus == 0)
+        return;
+
+    // 直接用寄存器读取（32位完整值）
+    uint32_t start = TIM2->CNT; // 直接读 CNT 寄存器
+
+    while ((TIM2->CNT - start) < nus);
 }
+

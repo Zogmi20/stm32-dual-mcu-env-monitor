@@ -33,11 +33,11 @@ project\dht11.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_sdmmc.h
 project\dht11.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 project\dht11.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 project\dht11.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
-project\dht11.o: ..\BSP\Inc\dht11.h
+project\dht11.o: ../BSP/Inc/dht11.h
 project\dht11.o: ../Core/Inc/gpio.h
 project\dht11.o: ../Core/Inc/usart.h
-project\dht11.o: ..\SYSTEM\Inc\delay.h
-project\dht11.o: ..\SYSTEM\Inc\sys.h
+project\dht11.o: ../SYSTEM/Inc/delay.h
+project\dht11.o: ../SYSTEM/Inc/sys.h
 project\dht11.o: ../Drivers/CMSIS/Include/core_cm4.h
 project\dht11.o: ../Core/Inc/tim.h
 project\dht11.o: E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin\..\include\string.h
