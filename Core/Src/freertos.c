@@ -31,6 +31,7 @@
 #include "main.h"
 #include "dht11.h"
 #include "usart.h"
+#include "lcd.h"
 
 /* USER CODE END Includes */
 
@@ -51,14 +52,30 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-float g_temperature = 0.0f;
-float g_humidity = 0.0f;
-uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
+// 一条消息：存放温度、湿度
+typedef struct
+{
+  float temp;
+  float humi;
+  uint8_t ok; // 1成功，0失败
+} SensorMsg_t;
+
+//====新增轮换缓冲区，3块足够
+static SensorMsg_t gMsgPool[5];
+static uint8_t poolIndex = 0;
+
+//全局变量版本
+// float g_temperature = 0.0f;
+// float g_humidity = 0.0f;
+// uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
+
 /* USER CODE END Variables */
 osThreadId defaultTaskHandle;
 osThreadId Task_DisplayHandle;
 osThreadId Task_RS485Handle;
 osThreadId Task_ReadSensorHandle;
+osMessageQId SensorQueueHandle;
+osMutexId LcdMutexHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -97,6 +114,10 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
+  /* Create the mutex(es) */
+  /* definition and creation of LcdMutex */
+  osMutexDef(LcdMutex);
+  LcdMutexHandle = osMutexCreate(osMutex(LcdMutex));
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
@@ -110,8 +131,14 @@ void MX_FREERTOS_Init(void) {
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
+  /* Create the queue(s) */
+  /* definition and creation of SensorQueue */
+  osMessageQDef(SensorQueue, 5, uint32_t);
+  SensorQueueHandle = osMessageCreate(osMessageQ(SensorQueue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
+  
+  
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -153,6 +180,7 @@ void StartDefaultTask(void const * argument)
     // HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_9);
     // printf("Hello World!\r\n");
     // osDelay(500);
+    osDelay(1);
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -167,10 +195,53 @@ void StartDefaultTask(void const * argument)
 void StartTask_Display(void const * argument)
 {
   /* USER CODE BEGIN StartTask_Display */
+  char lcd_buf[32];
+  //======================== CMSIS‑RTOS V1 使用 osEvent 接收消息 ======================== 
+  osEvent evt;
+  SensorMsg_t *pMsg;
+  osStatus status;
+
+  lcd_init();       // LCD初始化，只运行一次！放while前面
+  lcd_clear(WHITE); // 清屏
+  
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    //======== CMSIS‑RTOS V1 使用 osMutexWait 上锁！========
+    // osMutexWait(LcdMutexHandle, osWaitForever);//全局变量版本
+    // osMutexAcquire(LcdMutexHandle, osWaitForever);//CMSIS-RTOS V2 使用 osMutexAcquire 上锁！
+    // if (g_sensor_ok == 1)
+
+    // 1.先阻塞接收队列消息！！
+    evt = osMessageGet(SensorQueueHandle, osWaitForever);
+    // 2.上锁保护LCD屏幕
+    osMutexWait(LcdMutexHandle, osWaitForever);
+
+    if(evt.status == osEventMessage) // 收到消息
+      {
+        pMsg = (SensorMsg_t *)evt.value.p;
+        if (pMsg->ok == 1)
+        {
+          lcd_fill(20, 40, 220, 64, WHITE); // 擦掉温度那一行
+          lcd_fill(20, 80, 220, 64, WHITE); // 擦掉湿度那一行
+          sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
+          lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK); // 显示温湿度
+
+          sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
+          lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
+          
+        }
+        else
+        {
+          lcd_fill(20, 40, 220, 64, WHITE);
+          lcd_fill(20, 80, 220, 104, WHITE);
+          lcd_show_string(20, 40, 200, 24, 24, "Sensor Error!", BLACK);
+        }
+      }
+
+      //===== 解锁，释放屏幕资源 =====
+      osMutexRelease(LcdMutexHandle);
+      osDelay(500); // 500ms刷新一次屏幕，不要刷新太快
   }
   /* USER CODE END StartTask_Display */
 }
@@ -207,34 +278,47 @@ void StartTask_ReadSensor(void const * argument)
   char buffer[64];
   uint8_t ret;
   DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
-
+ 
   /* Infinite loop */
   for(;;)
   {
     //================================ DHT11温湿度传感器
     // ===== 临界区保护 DHT11 读取（禁用任务切换） =====
-    taskENTER_CRITICAL();
+    // taskENTER_CRITICAL();//全局变量的互斥锁在队列不需要用
     ret = DHT11_Read(&temp, &humi);
-    taskEXIT_CRITICAL();
+    // taskEXIT_CRITICAL(); // 全局变量的互斥锁在队列不需要用
     // =================================================
-
+    // 取一块全局缓存
+    SensorMsg_t *pMsg = &gMsgPool[poolIndex];
     if (ret == 0)
     {
-      g_temperature = temp;
-      g_humidity = humi;
-      g_sensor_ok = 1;
+      // 全局变量版本
+      //  g_temperature = temp;
+      //  g_humidity = humi;
+      //  g_sensor_ok = 1;
+      // 取一块全局缓存
+      pMsg->ok = 1;
+      pMsg->temp = temp;
+      pMsg->humi = humi;
 
+      // 等待10个tick，队列满不会立刻丢弃
+      osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
       sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
       HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
       HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
     }
     else
     {
-      g_sensor_ok = 0;
+      // 全局变量版本
+      //  g_sensor_ok = 0;
+      // 读取失败！也发送消息，标记错误
+      pMsg->ok = 0;
+      osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
       HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
       HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
     }
-
+    // 轮换缓存下标
+    poolIndex = (poolIndex + 1) % 5;
     // DHT11要求间隔 >= 1秒，这里用2秒
     osDelay(2000); // FreeRTOS的延时函数
   }

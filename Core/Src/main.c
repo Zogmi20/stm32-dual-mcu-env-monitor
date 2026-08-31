@@ -24,6 +24,7 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
+#include "fsmc.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -99,11 +100,12 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  // MX_SDIO_SD_Init();
+  MX_SDIO_SD_Init();
   MX_TIM2_Init();
   MX_USART1_UART_Init();
-  // MX_USART2_UART_Init();
-  // MX_FATFS_Init();
+  MX_USART2_UART_Init();
+  MX_FATFS_Init();
+  MX_FSMC_Init();
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
 
