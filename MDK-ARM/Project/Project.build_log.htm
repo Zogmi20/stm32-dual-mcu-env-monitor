@@ -22,12 +22,27 @@ Dialog DLL:      TCM.DLL V1.53.0.0
  
 <h2>Project:</h2>
 E:\Project\MDK-ARM\Project.uvprojx
-Project File Date:  08/31/2026
+Project File Date:  09/02/2026
 
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin'
 Build target 'Project'
-"Project\Project.axf" - 0 Error(s), 0 Warning(s).
+compiling alarm.c...
+..\Core\Src\alarm.c(266): warning:  #177-D: function "Alarm_SendDebugInfo"  was declared but never referenced
+  static void Alarm_SendDebugInfo(void)
+..\Core\Src\alarm.c: 1 warning, 0 errors
+compiling freertos.c...
+../Core/Src/freertos.c(256): warning:  #177-D: variable "status"  was declared but never referenced
+    osStatus status;
+../Core/Src/freertos.c(84): warning:  #177-D: variable "sys_mode"  was declared but never referenced
+  static SystemMode_t sys_mode = MODE_NORMAL;
+../Core/Src/freertos.c(85): warning:  #177-D: variable "setting_choice"  was declared but never referenced
+  static uint8_t setting_choice = 0; // 0=温度, 1=湿度
+../Core/Src/freertos.c: 3 warnings, 0 errors
+linking...
+Program Size: Code=36624 RO-data=12872 RW-data=188 ZI-data=17836  
+FromELF: creating hex file...
+"Project\Project.axf" - 0 Error(s), 4 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -51,7 +66,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:01
+Build Time Elapsed:  00:00:04
 </pre>
 </body>
 </html>

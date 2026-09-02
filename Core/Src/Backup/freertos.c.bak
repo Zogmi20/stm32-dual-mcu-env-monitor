@@ -32,6 +32,7 @@
 #include "dht11.h"
 #include "usart.h"
 #include "lcd.h"
+#include "flash.h"
 
 /* USER CODE END Includes */
 
@@ -57,8 +58,30 @@ typedef struct
 {
   float temp;
   float humi;
+  uint8_t ok; // 1成功，0失败
 } SensorMsg_t;
 
+
+//====新增轮换缓冲区，3块足够
+static SensorMsg_t gMsgPool[5];
+static uint8_t poolIndex = 0;
+
+//====温湿度独立报警阈值====
+float temp_alarm_high=38.0f; // 温度上限
+float humi_alarm_high=99.0f; // 湿度上限
+uint8_t set_mode_flag;
+
+// 在文件顶部定义状态
+typedef enum
+{
+  MODE_NORMAL = 0, // 正常显示模式
+  MODE_SET_TEMP,   // 设置温度阈值模式
+  MODE_SET_HUMI    // 设置湿度阈值模式
+} SystemMode_t;
+
+// 全局状态变量
+static SystemMode_t sys_mode = MODE_NORMAL;
+static uint8_t setting_choice = 0; // 0=温度, 1=湿度
 
 //全局变量版本
 // float g_temperature = 0.0f;
@@ -66,10 +89,9 @@ typedef struct
 // uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
 
 /* USER CODE END Variables */
-osThreadId defaultTaskHandle;
+osThreadId Task_ReadSensorHandle;
 osThreadId Task_DisplayHandle;
 osThreadId Task_RS485Handle;
-osThreadId Task_ReadSensorHandle;
 osMessageQId SensorQueueHandle;
 osMutexId LcdMutexHandle;
 
@@ -78,10 +100,9 @@ osMutexId LcdMutexHandle;
 
 /* USER CODE END FunctionPrototypes */
 
-void StartDefaultTask(void const * argument);
+void StartTask_ReadSensor(void const * argument);
 void StartTask_Display(void const * argument);
 void StartTask_RS485(void const * argument);
-void StartTask_ReadSensor(void const * argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -129,7 +150,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the queue(s) */
   /* definition and creation of SensorQueue */
-  osMessageQDef(SensorQueue, 5, uint16_t);
+  osMessageQDef(SensorQueue, 5, uint32_t);
   SensorQueueHandle = osMessageCreate(osMessageQ(SensorQueue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
@@ -138,9 +159,9 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+  /* definition and creation of Task_ReadSensor */
+  osThreadDef(Task_ReadSensor, StartTask_ReadSensor, osPriorityHigh, 0, 512);
+  Task_ReadSensorHandle = osThreadCreate(osThread(Task_ReadSensor), NULL);
 
   /* definition and creation of Task_Display */
   osThreadDef(Task_Display, StartTask_Display, osPriorityNormal, 0, 512);
@@ -150,35 +171,71 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(Task_RS485, StartTask_RS485, osPriorityNormal, 0, 512);
   Task_RS485Handle = osThreadCreate(osThread(Task_RS485), NULL);
 
-  /* definition and creation of Task_ReadSensor */
-  osThreadDef(Task_ReadSensor, StartTask_ReadSensor, osPriorityHigh, 0, 512);
-  Task_ReadSensorHandle = osThreadCreate(osThread(Task_ReadSensor), NULL);
-
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
 
 }
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_StartTask_ReadSensor */
 /**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
+* @brief Function implementing the Task_ReadSensor thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTask_ReadSensor */
+void StartTask_ReadSensor(void const * argument)
 {
-  /* USER CODE BEGIN StartDefaultTask */
+  /* USER CODE BEGIN StartTask_ReadSensor */
+  float temp = 0.0f, humi = 0.0f;
+  char buffer[64];
+  uint8_t ret;
+  DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
+ 
   /* Infinite loop */
   for(;;)
   {
-    // HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_9);
-    // printf("Hello World!\r\n");
-    // osDelay(500);
-    osDelay(1);
+    //================================ DHT11温湿度传感器
+    // ===== 临界区保护 DHT11 读取（禁用任务切换） =====
+    // taskENTER_CRITICAL();//全局变量的互斥锁在队列不需要用
+    ret = DHT11_Read(&temp, &humi);
+    // taskEXIT_CRITICAL(); // 全局变量的互斥锁在队列不需要用
+    // =================================================
+    // 取一块全局缓存
+    SensorMsg_t *pMsg = &gMsgPool[poolIndex];
+    if (ret == 0)
+    {
+      // 全局变量版本
+      //  g_temperature = temp;
+      //  g_humidity = humi;
+      //  g_sensor_ok = 1;
+      // 取一块全局缓存
+      pMsg->ok = 1;
+      pMsg->temp = temp;
+      pMsg->humi = humi;
+
+      // 等待10个tick，队列满不会立刻丢弃
+      osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
+      sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
+      HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
+      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
+    }
+    else
+    {
+      // 全局变量版本
+      //  g_sensor_ok = 0;
+      // 读取失败！也发送消息，标记错误
+      pMsg->ok = 0;
+      osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
+      HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
+      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
+    }
+    // 轮换缓存下标
+    poolIndex = (poolIndex + 1) % 5;
+    // DHT11要求间隔 >= 1秒，这里用2秒
+    osDelay(2000); // FreeRTOS的延时函数
   }
-  /* USER CODE END StartDefaultTask */
+  /* USER CODE END StartTask_ReadSensor */
 }
 
 /* USER CODE BEGIN Header_StartTask_Display */
@@ -199,7 +256,9 @@ void StartTask_Display(void const * argument)
 
   lcd_init();       // LCD初始化，只运行一次！放while前面
   lcd_clear(WHITE); // 清屏
-  
+                    // ==== 测试用：显示按键状态 ====
+  lcd_show_string(20, 20, 200, 24, 24, "KEY TEST MODE", BLUE);
+  lcd_show_string(20, 60, 200, 20, 20, "PA0=SET PA5=ADD", BLACK);
   /* Infinite loop */
   for(;;)
   {
@@ -216,19 +275,102 @@ void StartTask_Display(void const * argument)
     if(evt.status == osEventMessage) // 收到消息
       {
         pMsg = (SensorMsg_t *)evt.value.p;
-        lcd_fill(20, 40, 220, 64, WHITE); // 擦掉温度那一行
-        sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
-        lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK);// 显示温湿度
+        if (pMsg->ok == 1)
+        {
+          lcd_fill(20, 40, 220, 64, WHITE); // 擦掉温度那一行
+          lcd_fill(20, 80, 220, 64, WHITE); // 擦掉湿度那一行
+          lcd_fill(20, 120, 220, 64, WHITE);
+          lcd_fill(20, 160, 220, 64, WHITE);// 报警阈值
 
+          sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
+          lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK); // 显示温湿度
 
-        sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
-        lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
+          sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
+          lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
+
+          // 显示两个报警阈值
+          sprintf(lcd_buf, "T-ALARM:%.1f C", temp_alarm_high);
+          lcd_show_string(20, 120, 200, 24, 24, lcd_buf, BLACK);
+          sprintf(lcd_buf, "H-ALARM:%.1f %%", humi_alarm_high);
+          lcd_show_string(20, 160, 200, 24, 24, lcd_buf, BLACK);
+
+          // 温度过高  OR 湿度过高 → 蜂鸣器报警
+      if (pMsg->temp >= temp_alarm_high || pMsg->humi >= humi_alarm_high)
+      {
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
       }
       else
       {
-        lcd_fill(20, 40, 220, 64, WHITE);
-        lcd_show_string(20, 40, 200, 24, 24, "Sensor Error!", BLACK);
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
       }
+      
+        }
+        else
+        {
+          lcd_fill(20, 40, 220, 64, WHITE);
+          lcd_fill(20, 80, 220, 104, WHITE);
+          lcd_show_string(20, 40, 200, 24, 24, "Sensor Error!", BLACK);
+        }
+      }
+
+      // --- 测试 PA0 (WK-UP) ---
+      // 注意：WK-UP是高电平有效（按下为高电平）
+      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
+      {
+        // 消抖延时
+        osDelay(50);
+
+        // 等待按键释放（带超时保护，防止卡死）
+        uint32_t timeout = 0;
+        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET && timeout < 1000)
+        {
+          osDelay(1);
+          timeout++;
+        }
+        osDelay(20);
+
+        // ===== 蜂鸣器测试：长响1秒 =====
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+        osDelay(1000); // 响1秒
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+
+        // LCD显示按键状态
+        lcd_fill(20, 200, 220, 30, WHITE);
+        lcd_show_string(20, 200, 200, 20, 20, "PA0 Pressed!", RED);
+      }
+
+      // == == == == == == = 【按键测试代码 - 蜂鸣器测试】 == == == == == == =
+
+      // --- 测试 PA5 (KEY0) ---
+      // 注意：KEY0是低电平有效（按下为低电平）
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET)
+      {
+        // 消抖延时
+        osDelay(50);
+
+        // 等待按键释放（带超时保护）
+        uint32_t timeout = 0;
+        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET && timeout < 1000)
+        {
+          osDelay(1);
+          timeout++;
+        }
+        osDelay(20);
+
+        // ===== 蜂鸣器测试：短响200ms，连续响3次 =====
+        for (int i = 0; i < 3; i++)
+        {
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+          osDelay(200);
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+          osDelay(100);
+        }
+
+        // LCD显示按键状态
+        lcd_fill(20, 200, 220, 30, WHITE);
+        lcd_show_string(20, 200, 200, 20, 20, "PA5 Pressed!", RED);
+      }
+
       //===== 解锁，释放屏幕资源 =====
       osMutexRelease(LcdMutexHandle);
       osDelay(500); // 500ms刷新一次屏幕，不要刷新太快
@@ -252,60 +394,6 @@ void StartTask_RS485(void const * argument)
     osDelay(1);
   }
   /* USER CODE END StartTask_RS485 */
-}
-
-/* USER CODE BEGIN Header_StartTask_ReadSensor */
-/**
-* @brief Function implementing the Task_ReadSensor thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTask_ReadSensor */
-void StartTask_ReadSensor(void const * argument)
-{
-  /* USER CODE BEGIN StartTask_ReadSensor */
-  float temp = 0.0f, humi = 0.0f;
-  char buffer[64];
-  uint8_t ret;
-  DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
-  SensorMsg_t msg; // 定义一条消息
-  /* Infinite loop */
-  for(;;)
-  {
-    //================================ DHT11温湿度传感器
-    // ===== 临界区保护 DHT11 读取（禁用任务切换） =====
-    // taskENTER_CRITICAL();//全局变量的互斥锁在队列不需要用
-    ret = DHT11_Read(&temp, &humi);
-    // taskEXIT_CRITICAL(); // 全局变量的互斥锁在队列不需要用
-    // =================================================
-
-    if (ret == 0)
-    {
-      //全局变量版本
-      // g_temperature = temp;
-      // g_humidity = humi;
-      // g_sensor_ok = 1;
-      // 把数据装进消息结构体
-      msg.temp = temp;
-      msg.humi = humi;
-      // 发送消息到队列，等待0tick，发不出去立刻返回
-      osMessagePut(SensorQueueHandle, (uint32_t)&msg, 0);
-      sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
-      HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
-      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
-    }
-    else
-    {
-      //全局变量版本
-      // g_sensor_ok = 0;
-      HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
-      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
-    }
-
-    // DHT11要求间隔 >= 1秒，这里用2秒
-    osDelay(2000); // FreeRTOS的延时函数
-  }
-  /* USER CODE END StartTask_ReadSensor */
 }
 
 /* Private application code --------------------------------------------------*/

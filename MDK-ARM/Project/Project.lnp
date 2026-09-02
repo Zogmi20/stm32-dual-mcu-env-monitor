@@ -1,6 +1,7 @@
 --cpu=Cortex-M4.fp.sp
 "project\startup_stm32f407xx.o"
 "project\lcd.o"
+"project\flash.o"
 "project\main.o"
 "project\gpio.o"
 "project\freertos.o"
@@ -10,6 +11,7 @@
 "project\usart.o"
 "project\stm32f4xx_it.o"
 "project\stm32f4xx_hal_msp.o"
+"project\alarm.o"
 "project\bsp_driver_sd.o"
 "project\sd_diskio.o"
 "project\fatfs.o"

@@ -1,0 +1,35 @@
+#ifndef __ALARM_H
+#define __ALARM_H
+
+#include "main.h"
+
+// ==================== 配置宏 ====================
+#define ALARM_CONTINUOUS_THRESHOLD 5 // 连续超标5次触发报警
+#define ALARM_CLEAR_THRESHOLD 5      // 连续正常5次清除报警
+
+// ==================== 报警状态枚举 ====================
+typedef enum
+{
+    ALARM_STATE_NORMAL = 0, // 正常状态
+    ALARM_STATE_WARNING,    // 预警状态（即将触发）
+    ALARM_STATE_TRIGGERED,  // 已触发报警
+    ALARM_STATE_CLEARING    // 正在清除报警
+} AlarmState_t;
+
+// ==================== 报警信息结构体 ====================
+typedef struct
+{
+    AlarmState_t state;       // 当前报警状态
+    uint8_t continuous_count; // 连续超标计数
+    uint8_t normal_count;     // 连续正常计数
+    uint8_t triggered;        // 报警是否已触发 (0=未触发, 1=已触发)
+} Alarm_t;
+
+// ==================== 函数声明 ====================
+void Alarm_Init(void);
+void Alarm_Update(float temp, float humi, float temp_threshold, float humi_threshold);
+uint8_t Alarm_IsTriggered(void);
+AlarmState_t Alarm_GetState(void);
+void Alarm_Reset(void);
+
+#endif

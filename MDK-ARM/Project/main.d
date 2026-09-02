@@ -67,3 +67,4 @@ project\main.o: ../SYSTEM/Inc/delay.h
 project\main.o: ../SYSTEM/Inc/sys.h
 project\main.o: ../Drivers/CMSIS/Include/core_cm4.h
 project\main.o: E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin\..\include\stdio.h
+project\main.o: ../Core/Inc/flash.h

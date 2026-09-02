@@ -30,7 +30,9 @@
 /* USER CODE BEGIN Includes */
 #include "delay.h"
 #include<stdio.h>
+#include "flash.h"
 
+extern uint8_t set_mode_flag;
 extern UART_HandleTypeDef huart1;
 /* USER CODE END Includes */
 
@@ -52,6 +54,7 @@ extern UART_HandleTypeDef huart1;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+float temp_alarm_threshold;
 
 /* USER CODE END PV */
 
@@ -108,9 +111,9 @@ int main(void)
   MX_FSMC_Init();
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
-
-
-  
+  // 上电加载报警阈值，只读，不会擦写Flash，安全！
+  temp_alarm_threshold = Flash_Read_TempThreshold();
+  set_mode_flag = 0;
 
   /* USER CODE END 2 */
 
