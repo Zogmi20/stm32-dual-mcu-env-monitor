@@ -3,6 +3,8 @@
 #include "usart.h"
 #include <string.h>
 #include <stdio.h>
+#include "flash.h"
+#include "cmsis_os.h"
 
 // ==================== 外部变量 ====================
 extern float temp_alarm_high;
@@ -212,6 +214,7 @@ void Key_Process(void)
                 Key_Beep(100);
                 HAL_UART_Transmit(&huart1, (uint8_t *)"Cancel\r\n", 8, 100);
             }
+            g_pa0_key.key_pressed = 0;
         }
         else if (g_pa0_key.key_pressed == 1) // 短按
         {
@@ -325,6 +328,9 @@ static void Key_SaveAllSettings(void)
             humi_alarm_low = 0;
     }
 
+    // ===== ✅ 保存所有阈值到 Flash =====
+    Flash_Save_All(temp_alarm_high, temp_alarm_low, humi_alarm_high, humi_alarm_low);
+
     g_set_mode = SET_MODE_NORMAL;
     Key_Beep(800);
 
@@ -354,6 +360,6 @@ static void Key_ExitWithoutSave(void)
 static void Key_Beep(uint16_t duration_ms)
 {
     HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-    HAL_Delay(duration_ms);
+    osDelay(duration_ms);
     HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
 }

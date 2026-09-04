@@ -37,6 +37,7 @@
 #include "rs485.h"
 #include "keytpad_input.h"
 
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -86,8 +87,8 @@ typedef enum
 } SystemMode_t;
 
 // 全局状态变量
-static SystemMode_t sys_mode = MODE_NORMAL;
-static uint8_t setting_choice = 0; // 0=温度, 1=湿度
+// static SystemMode_t sys_mode = MODE_NORMAL;
+// static uint8_t setting_choice = 0; // 0=温度, 1=湿度
 
 //全局变量版本
 // float g_temperature = 0.0f;
@@ -264,6 +265,18 @@ void StartTask_Display(void const * argument)
   osEvent evt;
   SensorMsg_t *pMsg;
 // osStatus status;  // ← 注释掉未使用的变量
+
+  // ============================================================
+  // ===== 从 Flash 读取保存的阈值 =====
+  // ============================================================
+  float saved_temp_high, saved_temp_low, saved_humi_high, saved_humi_low;
+  Flash_Read_All(&saved_temp_high, &saved_temp_low, &saved_humi_high, &saved_humi_low);
+
+  // 赋值给全局变量（在 freertos.c 顶部定义的）
+  temp_alarm_high = saved_temp_high;
+  temp_alarm_low = saved_temp_low;
+  humi_alarm_high = saved_humi_high;
+  humi_alarm_low = saved_humi_low;
 
 // ===== 呼吸灯参数 =====
 #define BREATH_MAX 1000
@@ -461,27 +474,6 @@ void StartTask_Display(void const * argument)
               sprintf(alarm_buf, "ALARM:[%s]", type_str[alarm_type]);
               lcd_show_string(20, 200, 200, 24, 24, alarm_buf, RED);
             }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
             else
             {
               // ===== ✅ 正常：红灯熄灭 =====

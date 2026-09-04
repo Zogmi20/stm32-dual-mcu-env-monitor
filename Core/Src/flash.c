@@ -1,178 +1,175 @@
 #include "flash.h"
 #include "stdio.h"
+#include <math.h>
 #include "stm32f4xx_hal_flash.h"
 
-/* 内部函数：根据地址计算对应的扇区索引 */
-static uint32_t get_sector_index(uint32_t addr)
+// ===== 扇区 11 存储地址（4 个 float = 16 字节） =====
+#define FLASH_SAVE_ADDR_TEMP_HIGH 0x080E0000 // 温度上限
+#define FLASH_SAVE_ADDR_TEMP_LOW 0x080E0004  // 温度下限
+#define FLASH_SAVE_ADDR_HUMI_HIGH 0x080E0008 // 湿度上限
+#define FLASH_SAVE_ADDR_HUMI_LOW 0x080E000C  // 湿度下限
+
+// ===== 默认值 =====
+#define DEFAULT_TEMP_HIGH 35.0f
+#define DEFAULT_TEMP_LOW 5.0f
+#define DEFAULT_HUMI_HIGH 95.0f
+#define DEFAULT_HUMI_LOW 30.0f
+
+// ===== 擦除扇区 11 =====
+static void Flash_EraseSector11(void)
 {
-    if (addr < ADDR_FLASH_SECTOR_4) return FLASH_SECTOR_0;
-    else if (addr < ADDR_FLASH_SECTOR_5) return FLASH_SECTOR_4;
-    else if (addr < ADDR_FLASH_SECTOR_6) return FLASH_SECTOR_5;
-    else if (addr < ADDR_FLASH_SECTOR_7) return FLASH_SECTOR_6;
-    else if (addr < ADDR_FLASH_SECTOR_8) return FLASH_SECTOR_7;
-    else if (addr < ADDR_FLASH_SECTOR_9) return FLASH_SECTOR_8;
-    else if (addr < ADDR_FLASH_SECTOR_10) return FLASH_SECTOR_9;
-    else if (addr < ADDR_FLASH_SECTOR_11) return FLASH_SECTOR_10;
-    else return FLASH_SECTOR_11;
-}
-
-/* 1. 读一个32位字 */
-uint32_t stmflash_read_word(uint32_t faddr)
-{
-    return *(volatile uint32_t *)faddr;
-}
-
-/* 2. 擦除一个扇区（配合安全保护） */
-void stmflash_erase_sector(uint32_t sector_index)
-{
-    FLASH_EraseInitTypeDef erase_init;
-    uint32_t sector_error = 0;
-
-    erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
-    erase_init.Sector = sector_index;
-    erase_init.NbSectors = 1;
-    erase_init.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-
-    HAL_FLASH_Unlock();
-    HAL_FLASHEx_Erase(&erase_init, &sector_error);
-    HAL_FLASH_Lock();
-}
-
-/* 3. 写入指定长度的数据（带地址对齐和扇区保护） */
-void stmflash_write(uint32_t waddr, uint32_t *pbuf, uint32_t length)
-{
-    uint32_t i, sector_index;
-    uint32_t sector_start, sector_size, sector_end;
-
-    /* 【安全检查1】判断地址是否合法（必须在 0x08000000 之后） */
-    if (waddr < STM32_FLASH_BASE || waddr >= (STM32_FLASH_BASE + STM32_FLASH_SIZE)) 
-    {
-        printf("Error: 写入地址非法！\r\n");
-        return;
-    }
-
-    /* 【安全检查2】地址对齐检查！必须能被4整除！否则写不进去！ */
-    if (waddr % 4 != 0)
-    {
-        printf("Error: 地址未4字节对齐！写入失败！\r\n");
-        return;
-    }
-
-    /* 计算所在扇区 */
-    sector_index = get_sector_index(waddr);
-    if (sector_index == FLASH_SECTOR_0 || sector_index == FLASH_SECTOR_1 ||
-        sector_index == FLASH_SECTOR_2 || sector_index == FLASH_SECTOR_3)
-    {
-        /* 【绝对封死！】0~3扇区是程序（Bootloader）区，绝对不能碰！否则变砖！ */
-        printf("Error: 程序区扇区(0~3)被禁止写入！\r\n");
-        return;
-    }
-
-    /* 计算当前扇区的大小 */
-    if (sector_index == FLASH_SECTOR_4) sector_size = 0x10000; /* 64K */
-    else if (sector_index == FLASH_SECTOR_5) sector_size = 0x20000; /* 128K */
-    else sector_size = 0x20000; /* 其他大扇区都是 128K */
-
-    sector_start = waddr; 
-    sector_end = sector_start + sector_size;
-
-    /* 【安全检查3】检查写入长度是否跨越了本扇区边界 */
-    if (waddr + (length * 4) > sector_end)
-    {
-        printf("Error: 写入长度跨越了扇区边界！\r\n");
-        return;
-    }
-
-    /* 开始写入流程：先擦除当前扇区，再解锁，写入，再锁定 */
-    stmflash_erase_sector(sector_index);
-
-    HAL_FLASH_Unlock();
-    for (i = 0; i < length; i++)
-    {
-        /* 【核心】每次地址加 4（i*4），确保每个字节都在4字节对齐的位置！ */
-        HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, waddr + i * 4, pbuf[i]);
-    }
-    HAL_FLASH_Lock();
-}
-
-/* 4. 读取指定长度的数据 */
-void stmflash_read(uint32_t raddr, uint32_t *pbuf, uint32_t length)
-{
-    uint32_t i;
-    for (i = 0; i < length; i++)
-    {
-        pbuf[i] = stmflash_read_word(raddr + i * 4);
-    }
-}
-
-/* 5. 测试写入：记住必须在 main.c 里定义安全的地址！ */
-void test_write(uint32_t waddr, uint32_t wdata)
-{
-    uint32_t data;
-    stmflash_write(waddr, &wdata, 1);   /* 写入函数内部会自动判断扇区、对齐、擦除 */
-    data = stmflash_read_word(waddr);
-    printf("Write: 0x%08X, Read: 0x%08X\r\n", wdata, data);
-}
-
-
-
-
-
-#define FLASH_SAVE_ADDR_TEMP    0x080E0000   //温度存放地址
-#define FLASH_SAVE_ADDR_HUMI    0x080E0004   //湿度存放地址
-
-//保存温度阈值
-void Flash_Save_TempThreshold(float val)
-{
-    HAL_FLASH_Unlock();
     FLASH_EraseInitTypeDef erase;
     uint32_t err;
+
     erase.TypeErase = FLASH_TYPEERASE_SECTORS;
     erase.Sector = FLASH_SECTOR_11;
     erase.NbSectors = 1;
     erase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    HAL_FLASHEx_Erase(&erase,&err);
-    
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_SAVE_ADDR_TEMP, *(uint32_t*)&val);
-    HAL_FLASH_Lock();
-}
 
-//读取温度阈值
-float Flash_Read_TempThreshold(void)
-{
-    float val;
-    val = *(float*)FLASH_SAVE_ADDR_TEMP;
-    if(val < 0 || val > 60)
-    {
-        val = 28.0f;    //默认温度28℃
-    }
-    return val;
-}
-
-//====新增湿度阈值函数====
-void Flash_Save_HumiThreshold(float val)
-{
+    __disable_irq();
     HAL_FLASH_Unlock();
-    FLASH_EraseInitTypeDef erase;
-    uint32_t err;
-    erase.TypeErase = FLASH_TYPEERASE_SECTORS;
-    erase.Sector = FLASH_SECTOR_11;
-    erase.NbSectors = 1;
-    erase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-    HAL_FLASHEx_Erase(&erase,&err);
-    
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_SAVE_ADDR_HUMI, *(uint32_t*)&val);
+    HAL_FLASHEx_Erase(&erase, &err);
     HAL_FLASH_Lock();
+    __enable_irq();
+}
+// ===== 写入一个 float 到指定地址（不擦除，由调用者控制擦除） =====
+static void Flash_WriteFloat(uint32_t addr, float val)
+{
+    __disable_irq(); // ← 关闭所有中断
+    HAL_FLASH_Unlock();
+    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, *(uint32_t *)&val);
+    HAL_FLASH_Lock();
+    __enable_irq(); // ← 恢复中断
 }
 
-float Flash_Read_HumiThreshold(void)
+// ===== 保存温度上限 =====
+void Flash_Save_TempHigh(float val)
 {
-    float val;
-    val = *(float*)FLASH_SAVE_ADDR_HUMI;
-    if(val < 0 || val > 100)
-    {
-        val = 75.0f;    //默认湿度75%
-    }
+    float old_val = Flash_Read_TempHigh();
+    if (old_val == val)
+        return; // 值一样，不写入
+
+    Flash_EraseSector11();
+    Flash_WriteFloat(FLASH_SAVE_ADDR_TEMP_HIGH, val);
+}
+
+// ===== 读取温度上限 =====
+float Flash_Read_TempHigh(void)
+{
+    float val = *(float *)FLASH_SAVE_ADDR_TEMP_HIGH;
+    if (val != val || val < 0 || val > 60)
+        val = DEFAULT_TEMP_HIGH; // 默认 35°C
     return val;
 }
 
+// ===== 保存温度下限 =====
+void Flash_Save_TempLow(float val)
+{
+    float old_val = Flash_Read_TempLow();
+    if (old_val == val)
+        return; // 值一样，不写入
+    Flash_EraseSector11();
+    Flash_WriteFloat(FLASH_SAVE_ADDR_TEMP_LOW, val);
+}
+
+// ===== 读取温度下限 =====
+float Flash_Read_TempLow(void)
+{
+    float val = *(float *)FLASH_SAVE_ADDR_TEMP_LOW;
+    if (val != val || val < 0 || val > 60)
+        val = DEFAULT_TEMP_LOW; // 默认 5°C
+    return val;
+}
+
+// ===== 保存湿度上限 =====
+void Flash_Save_HumiHigh(float val)
+{
+    float old_val = Flash_Read_HumiHigh();
+    if (old_val == val)
+        return; // 值一样，不写入
+
+    Flash_EraseSector11();
+    Flash_WriteFloat(FLASH_SAVE_ADDR_HUMI_HIGH, val);
+}
+
+// ===== 读取湿度上限 =====
+float Flash_Read_HumiHigh(void)
+{
+    float val = *(float *)FLASH_SAVE_ADDR_HUMI_HIGH;
+    if (val != val || val < 0 || val > 100)
+        val = DEFAULT_HUMI_HIGH; // 默认 95%
+    return val;
+}
+
+// ===== 保存湿度下限 =====
+void Flash_Save_HumiLow(float val)
+{
+    float old_val = Flash_Read_HumiLow();
+    if (old_val == val)
+        return; // 值一样，不写入
+
+    Flash_EraseSector11();
+    Flash_WriteFloat(FLASH_SAVE_ADDR_HUMI_LOW, val);
+}
+
+// ===== 读取湿度下限 =====
+float Flash_Read_HumiLow(void)
+{
+    float val = *(float *)FLASH_SAVE_ADDR_HUMI_LOW;
+    if (val != val || val < 0 || val > 100)
+        val = DEFAULT_HUMI_LOW; // 默认 30%
+    return val;
+}
+
+// ===== ? 推荐：一次性保存所有阈值（只擦一次，值一样不写） =====
+void Flash_Save_All(float temp_high, float temp_low, float humi_high, float humi_low)
+{
+    // ===== 1?? 参数合法性检查 =====
+    if (temp_low >= temp_high)
+    {
+        temp_low = temp_high - 5.0f;
+        if (temp_low < 0)
+            temp_low = 0;
+    }
+    if (humi_low >= humi_high)
+    {
+        humi_low = humi_high - 20.0f;
+        if (humi_low < 0)
+            humi_low = 0;
+    }
+    if (humi_high > 100)
+        humi_high = 100;
+    if (humi_low < 0)
+        humi_low = 0;
+
+    // ===== 2?? 读取当前值 =====
+    float old_th = Flash_Read_TempHigh();
+    float old_tl = Flash_Read_TempLow();
+    float old_hh = Flash_Read_HumiHigh();
+    float old_hl = Flash_Read_HumiLow();
+
+    // ===== 3?? ? 用误差范围比较（而不是直接 ==） =====
+    if (fabsf(old_th - temp_high) < 0.01f &&
+        fabsf(old_tl - temp_low) < 0.01f &&
+        fabsf(old_hh - humi_high) < 0.01f &&
+        fabsf(old_hl - humi_low) < 0.01f)
+    {
+        return; // 值没变，不写入
+    }
+
+    // ===== 4?? 擦除并写入 =====
+    Flash_EraseSector11();
+    Flash_WriteFloat(FLASH_SAVE_ADDR_TEMP_HIGH, temp_high);
+    Flash_WriteFloat(FLASH_SAVE_ADDR_TEMP_LOW, temp_low);
+    Flash_WriteFloat(FLASH_SAVE_ADDR_HUMI_HIGH, humi_high);
+    Flash_WriteFloat(FLASH_SAVE_ADDR_HUMI_LOW, humi_low);
+}
+
+// ===== 读取所有 4 个阈值 =====
+void Flash_Read_All(float *temp_high, float *temp_low, float *humi_high, float *humi_low)
+{
+    *temp_high = Flash_Read_TempHigh();
+    *temp_low = Flash_Read_TempLow();
+    *humi_high = Flash_Read_HumiHigh();
+    *humi_low = Flash_Read_HumiLow();
+}
