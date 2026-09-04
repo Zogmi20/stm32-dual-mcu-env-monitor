@@ -4,6 +4,7 @@
 "project\flash.o"
 "project\alarm.o"
 "project\rs485.o"
+"project\keytpad_input.o"
 "project\main.o"
 "project\gpio.o"
 "project\freertos.o"

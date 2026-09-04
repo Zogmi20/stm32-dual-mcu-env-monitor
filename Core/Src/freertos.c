@@ -35,6 +35,7 @@
 #include "flash.h"
 #include "alarm.h"
 #include "rs485.h"
+#include "keytpad_input.h"
 
 /* USER CODE END Includes */
 
@@ -256,7 +257,7 @@ void StartTask_ReadSensor(void const * argument)
 * @retval None
 */
 /* USER CODE END Header_StartTask_Display */
-void StartTask_Display(void const *argument)
+void StartTask_Display(void const * argument)
 {
   /* USER CODE BEGIN StartTask_Display */
   char lcd_buf[32];
@@ -264,9 +265,8 @@ void StartTask_Display(void const *argument)
   SensorMsg_t *pMsg;
 // osStatus status;  // ← 注释掉未使用的变量
 
-// ===== 呼吸灯参数（放在最前面） =====
+// ===== 呼吸灯参数 =====
 #define BREATH_MAX 1000
-
 
   // ===== 呼吸灯变量 =====
   static uint16_t breath_pwm = 0;
@@ -282,7 +282,7 @@ void StartTask_Display(void const *argument)
   __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, 1000);
 
   lcd_show_string(20, 15, 200, 24, 24, "ENV MONITOR", BLUE);
-  lcd_show_string(20, 60, 200, 20, 20, "PA0=SET PE2=ADD", BLACK);
+  lcd_show_string(20, 274, 200, 16, 16, "PA0=SET PE2=ADD PE4=SUB", BLACK);
 
   for (;;)
   {
@@ -294,120 +294,221 @@ void StartTask_Display(void const *argument)
       pMsg = (SensorMsg_t *)evt.value.p;
       if (pMsg->ok == 1)
       {
-        // ===== LCD 显示 =====
-        lcd_fill(20, 40, 220, 64, WHITE);
-        lcd_fill(20, 80, 220, 64, WHITE);
-        lcd_fill(20, 120, 220, 64, WHITE);
-        lcd_fill(20, 160, 220, 64, WHITE);
-
-        sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
-        lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK);
-
-        sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
-        lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
-
-        sprintf(lcd_buf, "T:%.1f~%.1f C", temp_alarm_low, temp_alarm_high);
-        lcd_show_string(20, 120, 200, 24, 24, lcd_buf, BLACK);
-
-        sprintf(lcd_buf, "H:%.1f~%.1f %%", humi_alarm_low, humi_alarm_high);
-        lcd_show_string(20, 160, 200, 24, 24, lcd_buf, BLACK);
-
-        // ===== 报警检测 =====
-        Alarm_Update(pMsg->temp, pMsg->humi,
-                     temp_alarm_high, temp_alarm_low,
-                     humi_alarm_high, humi_alarm_low);
-
         // ============================================================
-        // ===== 🔥 红灯控制 =====
+        // ===== 🔧 第一步：检查是否处于设置模式（优先级最高） =====
         // ============================================================
-        if (Alarm_IsTriggered())
+        SetMode_t set_mode = Key_GetSetMode();
+
+        if (set_mode != SET_MODE_NORMAL)
         {
-          // ===== 🚨 报警：温度越界越严重，呼吸越快 =====
-          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+          // ===== 静态变量记录上次的设置模式和值 =====
+          static SetMode_t last_set_mode = SET_MODE_NORMAL;
+          static uint16_t last_set_value = 0;
 
-          // ---- 计算温度越界程度 ----
-          float over_ratio = 0.0f;
-          float temp = pMsg->temp;
+          uint16_t current_value = Key_GetSetValue();
 
-          if (temp > temp_alarm_high)
+          // ✅ 只有设置模式变化或值变化时才刷新
+          if (set_mode != last_set_mode || current_value != last_set_value)
           {
-            over_ratio = (temp - temp_alarm_high) / (temp_alarm_high * 0.3f);
+            // ============================================================
+            // ===== 设置模式界面 =====
+            // ============================================================
+            // lcd_fill(20, 40, 220, 64, WHITE);
+            // lcd_fill(20, 80, 220, 104, WHITE);
+            // lcd_fill(20, 120, 220, 144, WHITE);
+            // lcd_fill(20, 160, 220, 184, WHITE);
+            // lcd_fill(20, 200, 220, 224, WHITE);
+            // 一次性清空 y=40~266 所有数据区域
+            lcd_fill(20, 40, 220, 224, WHITE);
+
+            const char *mode_str[] = {"NORMAL", "TEMP LOW", "TEMP HIGH", "HUMI LOW", "HUMI HIGH"};
+            char set_buf[32];
+
+            sprintf(set_buf, "SET: %s", mode_str[set_mode]);
+            lcd_show_string(20, 40, 200, 24, 24, set_buf, BLUE);
+
+            sprintf(set_buf, "Value: %d", Key_GetSetValue());
+            lcd_show_string(20, 80, 200, 24, 24, set_buf, BLUE);
+
+            lcd_show_string(20, 250, 200, 16, 16, "Long PA0=Cancel", BLACK);
+            // ✅ 更新记录
+            last_set_mode = set_mode;
+            last_set_value = current_value;
           }
-          else if (temp < temp_alarm_low)
-          {
-            over_ratio = (temp_alarm_low - temp) / (temp_alarm_low * 0.3f);
+            // ===== 设置模式下：屏蔽报警（红灯熄灭） =====
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+            __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX);
+
+            // 跳过正常模式的报警检测和呼吸灯
+            // 直接跳到 osMutexRelease
           }
+        else
+        {
+          // ============================================================
+          // ===== 正常模式 =====
+          // ============================================================
+          // ===== ✅ 定义静态变量（函数开头） =====
+          static float last_temp = 0;
+          static float last_humi = 0;
+          static uint8_t last_alarm = 0xFF;
 
-          if (over_ratio < 0)
-            over_ratio = 0;
-          if (over_ratio > 1)
-            over_ratio = 1;
+          // ===== ✅ 判断是否需要刷新 =====
+          uint8_t alarm_state = Alarm_IsTriggered();
+          uint8_t need_refresh = 0;
 
-          // ---- 越界程度 → 呼吸步长（10~100） ----
-          uint16_t dynamic_step = 10 + (uint16_t)(over_ratio * 90);
-
-          // ---- 呼吸算法（用动态步长） ----
-          if (breath_dir)
+          if (pMsg->temp != last_temp || pMsg->humi != last_humi)
           {
-            breath_pwm += dynamic_step;
-            if (breath_pwm >= BREATH_MAX)
+            need_refresh = 1;
+          }
+          if (alarm_state != last_alarm)
+          {
+            need_refresh = 1;
+          }
+          // ===== ✅ 只有变化时才需要刷新 =====
+          if (need_refresh)
+          {
+            // ===== LCD 显示 =====
+            // lcd_fill(20, 40, 220, 64, WHITE);
+            // lcd_fill(20, 80, 220, 104, WHITE);
+            // lcd_fill(20, 120, 220, 144, WHITE);
+            // lcd_fill(20, 160, 220, 184, WHITE);
+            // lcd_fill(20, 250, 220, 266, WHITE);
+            // 一次性清空 y=40~266 所有数据区域
+            lcd_fill(20, 40, 220, 266, WHITE);
+
+            sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
+            lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK);
+
+            sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
+            lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
+
+            sprintf(lcd_buf, "T:%.1f~%.1f C", temp_alarm_low, temp_alarm_high);
+            lcd_show_string(20, 120, 200, 24, 24, lcd_buf, BLACK);
+
+            sprintf(lcd_buf, "H:%.1f~%.1f %%", humi_alarm_low, humi_alarm_high);
+            lcd_show_string(20, 160, 200, 24, 24, lcd_buf, BLACK);
+            // ===== ✅ 更新记录 =====
+            last_temp = pMsg->temp;
+            last_humi = pMsg->humi;
+            last_alarm = alarm_state;
+          }
+            // ===== 报警检测 =====
+            Alarm_Update(pMsg->temp, pMsg->humi,
+                         temp_alarm_high, temp_alarm_low,
+                         humi_alarm_high, humi_alarm_low);
+
+            // ============================================================
+            // ===== 🔥 红灯控制 =====
+            // ============================================================
+            if (Alarm_IsTriggered())
             {
-              breath_pwm = BREATH_MAX;
-              breath_dir = 0;
+              // ===== 🚨 报警：温度越界越严重，呼吸越快 =====
+              HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+
+              // ---- 计算温度越界程度 ----
+              float over_ratio = 0.0f;
+              float temp = pMsg->temp;
+
+              if (temp > temp_alarm_high)
+              {
+                over_ratio = (temp - temp_alarm_high) / (temp_alarm_high * 0.3f);
+              }
+              else if (temp < temp_alarm_low)
+              {
+                over_ratio = (temp_alarm_low - temp) / (temp_alarm_low * 0.3f);
+              }
+
+              if (over_ratio < 0)
+                over_ratio = 0;
+              if (over_ratio > 1)
+                over_ratio = 1;
+
+              // ---- 越界程度 → 呼吸步长（10~100） ----
+              uint16_t dynamic_step = 10 + (uint16_t)(over_ratio * 90);
+
+              // ---- 呼吸算法（用动态步长） ----
+              if (breath_dir)
+              {
+                breath_pwm += dynamic_step;
+                if (breath_pwm >= BREATH_MAX)
+                {
+                  breath_pwm = BREATH_MAX;
+                  breath_dir = 0;
+                }
+              }
+              else
+              {
+                if (breath_pwm > dynamic_step)
+                {
+                  breath_pwm -= dynamic_step;
+                }
+                else
+                {
+                  breath_pwm = 0;
+                  breath_dir = 1;
+                }
+              }
+
+              __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX - breath_pwm);
+
+              lcd_fill(20, 200, 220, 224, WHITE);
+
+              // 获取报警类型
+              uint8_t alarm_type = Alarm_GetType();
+              const char *type_str[] = {"Recovered", "TEMP HIGH", "TEMP LOW", "HUMI HIGH", "HUMI LOW", "BOTH"};
+
+              char alarm_buf[32];
+              sprintf(alarm_buf, "ALARM:[%s]", type_str[alarm_type]);
+              lcd_show_string(20, 200, 200, 24, 24, alarm_buf, RED);
             }
-          }
-          else
-          {
-            if (breath_pwm > dynamic_step)
-            {
-              breath_pwm -= dynamic_step;
-            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             else
             {
-              breath_pwm = 0;
-              breath_dir = 1;
+              // ===== ✅ 正常：红灯熄灭 =====
+              HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+              __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX);
+
+              lcd_fill(20, 200, 240, 224, WHITE);
+
+              AlarmState_t state = Alarm_GetState();
+              if (state == ALARM_STATE_WARNING)
+              {
+                uint8_t cnt = Alarm_GetContinuousCount();
+                sprintf(lcd_buf, "Warning:%d/5", cnt);
+                lcd_show_string(20, 200, 200, 24, 24, lcd_buf, BLUE);
+              }
+              else if (state == ALARM_STATE_CLEARING)
+              {
+                uint8_t cnt = Alarm_GetNormalCount();
+                sprintf(lcd_buf, "Clearing:%d/3", cnt);
+                lcd_show_string(20, 200, 200, 24, 24, lcd_buf, GREEN);
+              }
+              else
+              {
+                lcd_show_string(20, 200, 200, 24, 24, "Temp Humi Normal", BLACK);
+              }
             }
-          }
-
-          __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX - breath_pwm);
-
-          lcd_fill(20, 195, 240, 270, WHITE);
-
-          // 获取报警类型
-          uint8_t alarm_type = Alarm_GetType();
-          const char *type_str[] = {"", "TEMP HIGH", "TEMP LOW", "HUMI HIGH", "HUMI LOW", "BOTH"};
-
-          char alarm_buf[32];
-          sprintf(alarm_buf, "ALARM:[%s]", type_str[alarm_type]);
-          lcd_show_string(20, 200, 200, 24, 24, alarm_buf, RED);
-        }
-        else 
-        {
-          // ===== ✅ 正常：红灯熄灭 =====
-          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-          __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX);
-
-          lcd_fill(20, 195, 240, 270, WHITE);
-
-          AlarmState_t state = Alarm_GetState();
-          if (state == ALARM_STATE_WARNING)
-          {
-            uint8_t cnt = Alarm_GetContinuousCount();
-            sprintf(lcd_buf, "Warning:%d/5", cnt);
-            lcd_show_string(20, 200, 200, 24, 24, lcd_buf, BLUE);
-          }
-          else if (state == ALARM_STATE_CLEARING)
-          {
-            uint8_t cnt = Alarm_GetNormalCount();
-            sprintf(lcd_buf, "Clearing:%d/3", cnt);
-            lcd_show_string(20, 200, 200, 24, 24, lcd_buf, GREEN);
-          }
-          else
-          {
-            lcd_fill(20, 195, 240, 270, WHITE);
-            lcd_show_string(20, 200, 200, 24, 24, "Temp Humi Normal", BLACK);
-          }
-        }
+          } // ===== 正常模式结束 =====
       }
       else
       {
@@ -424,7 +525,9 @@ void StartTask_Display(void const *argument)
     }
 
     osMutexRelease(LcdMutexHandle);
-    osDelay(50);
+    // ===== 按键扫描（互斥锁释放之后） =====
+    Key_Process();
+    osDelay(200);
   }
   /* USER CODE END StartTask_Display */
 }

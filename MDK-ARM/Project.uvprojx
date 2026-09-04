@@ -414,6 +414,11 @@
               <FilePath>..\Core\Src\rs485.c</FilePath>
             </File>
             <File>
+              <FileName>keytpad_input.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\keytpad_input.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>

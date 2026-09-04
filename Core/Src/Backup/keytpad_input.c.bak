@@ -1,4 +1,4 @@
-#include "keypad_input.h"
+#include "keytpad_input.h"
 #include "alarm.h"
 #include "usart.h"
 #include <string.h>
@@ -147,7 +147,7 @@ void Key_Process(void)
             case SET_MODE_TEMP_LOW:
             case SET_MODE_TEMP_HIGH:
                 if (g_set_value < 99)
-                    g_set_value += 1;
+                    g_set_value += 5;
                 Key_Beep(30);
                 break;
 
