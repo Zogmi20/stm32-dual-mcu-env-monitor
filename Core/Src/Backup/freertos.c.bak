@@ -33,6 +33,8 @@
 #include "usart.h"
 #include "lcd.h"
 #include "flash.h"
+#include "alarm.h"
+#include "rs485.h"
 
 /* USER CODE END Includes */
 
@@ -67,8 +69,11 @@ static SensorMsg_t gMsgPool[5];
 static uint8_t poolIndex = 0;
 
 //====温湿度独立报警阈值====
-float temp_alarm_high=38.0f; // 温度上限
-float humi_alarm_high=99.0f; // 湿度上限
+//====温湿度报警阈值 (大棚用)====
+float temp_alarm_high = 35.0f; // 温度上限
+float temp_alarm_low = 5.0f;   // 温度下限
+float humi_alarm_high = 95.0f; // 湿度上限
+float humi_alarm_low = 30.0f;  // 湿度下限
 uint8_t set_mode_flag;
 
 // 在文件顶部定义状态
@@ -88,6 +93,7 @@ static uint8_t setting_choice = 0; // 0=温度, 1=湿度
 // float g_humidity = 0.0f;
 // uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
 
+osMessageQId RS485QueueHandle;
 /* USER CODE END Variables */
 osThreadId Task_ReadSensorHandle;
 osThreadId Task_DisplayHandle;
@@ -154,8 +160,10 @@ void MX_FREERTOS_Init(void) {
   SensorQueueHandle = osMessageCreate(osMessageQ(SensorQueue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  
-  
+  // ===== 为 RS485 创建独立队列 =====
+  osMessageQDef(RS485Queue, 5, uint32_t);
+  RS485QueueHandle = osMessageCreate(osMessageQ(RS485Queue), NULL);
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -216,9 +224,11 @@ void StartTask_ReadSensor(void const * argument)
 
       // 等待10个tick，队列满不会立刻丢弃
       osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
+      osMessagePut(RS485QueueHandle, (uint32_t)pMsg, 10);
+
       sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
       HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
-      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_RESET);
     }
     else
     {
@@ -227,8 +237,9 @@ void StartTask_ReadSensor(void const * argument)
       // 读取失败！也发送消息，标记错误
       pMsg->ok = 0;
       osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
+      osMessagePut(RS485QueueHandle, (uint32_t)pMsg, 10);
       HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
-      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
     }
     // 轮换缓存下标
     poolIndex = (poolIndex + 1) % 5;
@@ -257,7 +268,7 @@ void StartTask_Display(void const * argument)
   lcd_init();       // LCD初始化，只运行一次！放while前面
   lcd_clear(WHITE); // 清屏
                     // ==== 测试用：显示按键状态 ====
-  lcd_show_string(20, 20, 200, 24, 24, "KEY TEST MODE", BLUE);
+  lcd_show_string(20, 15, 200, 24, 24, "TEST MODE", BLUE);
   lcd_show_string(20, 60, 200, 20, 20, "PA0=SET PA5=ADD", BLACK);
   /* Infinite loop */
   for(;;)
@@ -280,7 +291,7 @@ void StartTask_Display(void const * argument)
           lcd_fill(20, 40, 220, 64, WHITE); // 擦掉温度那一行
           lcd_fill(20, 80, 220, 64, WHITE); // 擦掉湿度那一行
           lcd_fill(20, 120, 220, 64, WHITE);
-          lcd_fill(20, 160, 220, 64, WHITE);// 报警阈值
+          lcd_fill(20, 160, 220, 64, WHITE);// 报警阈值两行
 
           sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
           lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK); // 显示温湿度
@@ -289,88 +300,81 @@ void StartTask_Display(void const * argument)
           lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
 
           // 显示两个报警阈值
-          sprintf(lcd_buf, "T-ALARM:%.1f C", temp_alarm_high);
+          // 显示温度阈值
+          sprintf(lcd_buf, "T:%.1f~%.1f C", temp_alarm_low, temp_alarm_high);
           lcd_show_string(20, 120, 200, 24, 24, lcd_buf, BLACK);
-          sprintf(lcd_buf, "H-ALARM:%.1f %%", humi_alarm_high);
+
+          // 显示湿度阈值
+          sprintf(lcd_buf, "H:%.1f~%.1f %%", humi_alarm_low, humi_alarm_high);
           lcd_show_string(20, 160, 200, 24, 24, lcd_buf, BLACK);
 
           // 温度过高  OR 湿度过高 → 蜂鸣器报警
-      if (pMsg->temp >= temp_alarm_high || pMsg->humi >= humi_alarm_high)
-      {
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-      }
-      else
-      {
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-      }
-      
+          // ===== 显示报警状态（包含计数） =====
+          // ===== ✅ 关键：调用 Alarm_Update 更新报警状态 =====
+          Alarm_Update(pMsg->temp, pMsg->humi,
+                       temp_alarm_high, temp_alarm_low,
+                       humi_alarm_high, humi_alarm_low);
+          // ===== ✅ 关键：根据报警状态控制蜂鸣器和LED =====
+          if (Alarm_IsTriggered())
+          {
+            // 报警触发：蜂鸣器响，PF9亮
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET); // 蜂鸣器响
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET); // 报警灯亮
+          }
+          else
+          {
+            // 正常：蜂鸣器关，PF9灭
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET); // 蜂鸣器关
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET); // 报警灯灭
+          }
+
+          // ===== 显示报警状态 =====
+          lcd_fill(20, 195, 240, 270, WHITE); // 清空 y=195~270
+
+          if (Alarm_IsTriggered())
+          {
+            AlarmType_t type = Alarm_GetType();
+            const char *type_str[] = {"", "TEMP HIGH", "TEMP LOW", "HUMI HIGH", "HUMI LOW", "BOTH"};
+
+            sprintf(lcd_buf, "ALARM:%s", type_str[type]);
+            lcd_show_string(20, 200, 200, 24, 24, lcd_buf, RED);
+          }
+          else
+          {
+            AlarmState_t state = Alarm_GetState();
+
+            if (state == ALARM_STATE_WARNING)
+            {
+              uint8_t cnt = Alarm_GetContinuousCount();
+              sprintf(lcd_buf, "Warn:%d/5", cnt);
+              lcd_show_string(20, 200, 200, 24, 24, lcd_buf, BLUE);
+            }
+            else if (state == ALARM_STATE_CLEARING)
+            {
+              uint8_t cnt = Alarm_GetNormalCount();
+              sprintf(lcd_buf, "Clear:%d/3", cnt);
+              lcd_show_string(20, 200, 200, 24, 24, lcd_buf, GREEN);
+            }
+            else
+            {
+              lcd_fill(20, 195, 240, 270, WHITE); // 再次清空确保干净
+              lcd_show_string(20, 200, 200, 24, 24, "Temp Humi Normal", BLACK);
+            }
+          }
         }
         else
         {
+          // 传感器错误
           lcd_fill(20, 40, 220, 64, WHITE);
           lcd_fill(20, 80, 220, 104, WHITE);
-          lcd_show_string(20, 40, 200, 24, 24, "Sensor Error!", BLACK);
-        }
-      }
+          lcd_show_string(20, 40, 220, 24, 24, "Sensor Error!", BLACK);
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
 
-      // --- 测试 PA0 (WK-UP) ---
-      // 注意：WK-UP是高电平有效（按下为高电平）
-      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
-      {
-        // 消抖延时
-        osDelay(50);
-
-        // 等待按键释放（带超时保护，防止卡死）
-        uint32_t timeout = 0;
-        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET && timeout < 1000)
-        {
-          osDelay(1);
-          timeout++;
-        }
-        osDelay(20);
-
-        // ===== 蜂鸣器测试：长响1秒 =====
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-        osDelay(1000); // 响1秒
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-
-        // LCD显示按键状态
-        lcd_fill(20, 200, 220, 30, WHITE);
-        lcd_show_string(20, 200, 200, 20, 20, "PA0 Pressed!", RED);
-      }
-
-      // == == == == == == = 【按键测试代码 - 蜂鸣器测试】 == == == == == == =
-
-      // --- 测试 PA5 (KEY0) ---
-      // 注意：KEY0是低电平有效（按下为低电平）
-    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET)
-      {
-        // 消抖延时
-        osDelay(50);
-
-        // 等待按键释放（带超时保护）
-        uint32_t timeout = 0;
-        while (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5) == GPIO_PIN_RESET && timeout < 1000)
-        {
-          osDelay(1);
-          timeout++;
-        }
-        osDelay(20);
-
-        // ===== 蜂鸣器测试：短响200ms，连续响3次 =====
-        for (int i = 0; i < 3; i++)
-        {
-          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-          osDelay(200);
+          // 传感器错误时关闭蜂鸣器
           HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-          osDelay(100);
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
         }
-
-        // LCD显示按键状态
-        lcd_fill(20, 200, 220, 30, WHITE);
-        lcd_show_string(20, 200, 200, 20, 20, "PA5 Pressed!", RED);
-      }
-
+      }    
       //===== 解锁，释放屏幕资源 =====
       osMutexRelease(LcdMutexHandle);
       osDelay(500); // 500ms刷新一次屏幕，不要刷新太快
@@ -380,18 +384,42 @@ void StartTask_Display(void const * argument)
 
 /* USER CODE BEGIN Header_StartTask_RS485 */
 /**
-* @brief Function implementing the Task_RS485 thread.
-* @param argument: Not used
-* @retval None
-*/
+ * @brief Function implementing the Task_RS485 thread.
+ * @param argument: Not used
+ * @retval None
+ */
 /* USER CODE END Header_StartTask_RS485 */
-void StartTask_RS485(void const * argument)
+void StartTask_RS485(void const *argument)
 {
   /* USER CODE BEGIN StartTask_RS485 */
+  osEvent evt;
+  SensorMsg_t *pMsg;
+
+  // 初始化 RS485 (使用 USART2)
+  rs485_init(115200);
+
   /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    // ===== ✅ 从专用队列阻塞等待 =====
+    evt = osMessageGet(RS485QueueHandle, osWaitForever);
+
+    if (evt.status == osEventMessage)
+    {
+      pMsg = (SensorMsg_t *)evt.value.p;
+      if (pMsg->ok == 1)
+      {
+        // 立即发送 RS485 数据
+        rs485_send_frame(pMsg->temp, pMsg->humi);
+
+        // 串口调试输出
+        char buf[64];
+        sprintf(buf, "RS485 Send: T=%.1f H=%.1f\r\n", pMsg->temp, pMsg->humi);
+        HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
+      }
+    }
+
+    // 不需要 osDelay，有消息就立即处理，没消息就阻塞等待
   }
   /* USER CODE END StartTask_RS485 */
 }

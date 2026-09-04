@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "dma.h"
 #include "fatfs.h"
 #include "sdio.h"
 #include "tim.h"
@@ -103,12 +104,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_SDIO_SD_Init();
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_FATFS_Init();
   MX_FSMC_Init();
+  MX_TIM14_Init();
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
   // 上电加载报警阈值，只读，不会擦写Flash，安全！

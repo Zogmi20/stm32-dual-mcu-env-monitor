@@ -34,6 +34,7 @@
 #include "lcd.h"
 #include "flash.h"
 #include "alarm.h"
+#include "rs485.h"
 
 /* USER CODE END Includes */
 
@@ -68,8 +69,11 @@ static SensorMsg_t gMsgPool[5];
 static uint8_t poolIndex = 0;
 
 //====温湿度独立报警阈值====
-float temp_alarm_high=38.0f; // 温度上限
-float humi_alarm_high=98.0f; // 湿度上限
+//====温湿度报警阈值 (大棚用)====
+float temp_alarm_high = 35.0f; // 温度上限
+float temp_alarm_low = 5.0f;   // 温度下限
+float humi_alarm_high = 95.0f; // 湿度上限
+float humi_alarm_low = 30.0f;  // 湿度下限
 uint8_t set_mode_flag;
 
 // 在文件顶部定义状态
@@ -89,6 +93,7 @@ static uint8_t setting_choice = 0; // 0=温度, 1=湿度
 // float g_humidity = 0.0f;
 // uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
 
+osMessageQId RS485QueueHandle;
 /* USER CODE END Variables */
 osThreadId Task_ReadSensorHandle;
 osThreadId Task_DisplayHandle;
@@ -155,8 +160,10 @@ void MX_FREERTOS_Init(void) {
   SensorQueueHandle = osMessageCreate(osMessageQ(SensorQueue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  
-  
+  // ===== 为 RS485 创建独立队列 =====
+  osMessageQDef(RS485Queue, 5, uint32_t);
+  RS485QueueHandle = osMessageCreate(osMessageQ(RS485Queue), NULL);
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -217,6 +224,8 @@ void StartTask_ReadSensor(void const * argument)
 
       // 等待10个tick，队列满不会立刻丢弃
       osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
+      osMessagePut(RS485QueueHandle, (uint32_t)pMsg, 10);
+
       sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
       HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
       HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_RESET);
@@ -228,6 +237,7 @@ void StartTask_ReadSensor(void const * argument)
       // 读取失败！也发送消息，标记错误
       pMsg->ok = 0;
       osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
+      osMessagePut(RS485QueueHandle, (uint32_t)pMsg, 10);
       HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
       HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
     }
@@ -246,139 +256,217 @@ void StartTask_ReadSensor(void const * argument)
 * @retval None
 */
 /* USER CODE END Header_StartTask_Display */
-void StartTask_Display(void const * argument)
+void StartTask_Display(void const *argument)
 {
   /* USER CODE BEGIN StartTask_Display */
   char lcd_buf[32];
-  //======================== CMSIS‑RTOS V1 使用 osEvent 接收消息 ======================== 
   osEvent evt;
   SensorMsg_t *pMsg;
-  osStatus status;
+// osStatus status;  // ← 注释掉未使用的变量
 
-  lcd_init();       // LCD初始化，只运行一次！放while前面
-  lcd_clear(WHITE); // 清屏
-                    // ==== 测试用：显示按键状态 ====
-  lcd_show_string(20, 15, 200, 24, 24, "KEY TEST MODE", BLUE);
-  lcd_show_string(20, 60, 200, 20, 20, "PA0=SET PA5=ADD", BLACK);
-  /* Infinite loop */
-  for(;;)
+// ===== 呼吸灯参数（放在最前面） =====
+#define BREATH_MAX 1000
+
+
+  // ===== 呼吸灯变量 =====
+  static uint16_t breath_pwm = 0;
+  static uint8_t breath_dir = 1;
+
+  lcd_init();
+  lcd_clear(WHITE);
+
+  // ===== 启动 PWM =====
+  HAL_TIM_PWM_Start(&htim14, TIM_CHANNEL_1);
+
+  // ===== 初始状态：红灯熄灭（低电平点亮 → 占空比 100% = 熄灭） =====
+  __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, 1000);
+
+  lcd_show_string(20, 15, 200, 24, 24, "ENV MONITOR", BLUE);
+  lcd_show_string(20, 60, 200, 20, 20, "PA0=SET PE2=ADD", BLACK);
+
+  for (;;)
   {
-    //======== CMSIS‑RTOS V1 使用 osMutexWait 上锁！========
-    // osMutexWait(LcdMutexHandle, osWaitForever);//全局变量版本
-    // osMutexAcquire(LcdMutexHandle, osWaitForever);//CMSIS-RTOS V2 使用 osMutexAcquire 上锁！
-    // if (g_sensor_ok == 1)
-
-    // 1.先阻塞接收队列消息！！
     evt = osMessageGet(SensorQueueHandle, osWaitForever);
-    // 2.上锁保护LCD屏幕
     osMutexWait(LcdMutexHandle, osWaitForever);
 
-    if(evt.status == osEventMessage) // 收到消息
+    if (evt.status == osEventMessage)
+    {
+      pMsg = (SensorMsg_t *)evt.value.p;
+      if (pMsg->ok == 1)
       {
-        pMsg = (SensorMsg_t *)evt.value.p;
-        if (pMsg->ok == 1)
+        // ===== LCD 显示 =====
+        lcd_fill(20, 40, 220, 64, WHITE);
+        lcd_fill(20, 80, 220, 64, WHITE);
+        lcd_fill(20, 120, 220, 64, WHITE);
+        lcd_fill(20, 160, 220, 64, WHITE);
+
+        sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
+        lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK);
+
+        sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
+        lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
+
+        sprintf(lcd_buf, "T:%.1f~%.1f C", temp_alarm_low, temp_alarm_high);
+        lcd_show_string(20, 120, 200, 24, 24, lcd_buf, BLACK);
+
+        sprintf(lcd_buf, "H:%.1f~%.1f %%", humi_alarm_low, humi_alarm_high);
+        lcd_show_string(20, 160, 200, 24, 24, lcd_buf, BLACK);
+
+        // ===== 报警检测 =====
+        Alarm_Update(pMsg->temp, pMsg->humi,
+                     temp_alarm_high, temp_alarm_low,
+                     humi_alarm_high, humi_alarm_low);
+
+        // ============================================================
+        // ===== 🔥 红灯控制 =====
+        // ============================================================
+        if (Alarm_IsTriggered())
         {
-          lcd_fill(20, 40, 220, 64, WHITE); // 擦掉温度那一行
-          lcd_fill(20, 80, 220, 64, WHITE); // 擦掉湿度那一行
-          lcd_fill(20, 120, 220, 64, WHITE);
-          lcd_fill(20, 160, 220, 64, WHITE);// 报警阈值两行
+          // ===== 🚨 报警：温度越界越严重，呼吸越快 =====
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
 
-          sprintf(lcd_buf, "Temp:%.1f C", pMsg->temp);
-          lcd_show_string(20, 40, 200, 24, 24, lcd_buf, BLACK); // 显示温湿度
+          // ---- 计算温度越界程度 ----
+          float over_ratio = 0.0f;
+          float temp = pMsg->temp;
 
-          sprintf(lcd_buf, "Humi:%.1f %%", pMsg->humi);
-          lcd_show_string(20, 80, 200, 24, 24, lcd_buf, BLACK);
-
-          // 显示两个报警阈值
-          sprintf(lcd_buf, "T-ALARM:%.1f C", temp_alarm_high);
-          lcd_show_string(20, 120, 200, 24, 24, lcd_buf, BLACK);
-          
-          sprintf(lcd_buf, "H-ALARM:%.1f %%", humi_alarm_high);
-          lcd_show_string(20, 160, 200, 24, 24, lcd_buf, BLACK);
-
-          // 温度过高  OR 湿度过高 → 蜂鸣器报警
-          // ===== 显示报警状态（包含计数） =====
-          // ===== ✅ 关键：调用 Alarm_Update 更新报警状态 =====
-          Alarm_Update(pMsg->temp, pMsg->humi, temp_alarm_high, humi_alarm_high);
-
-          // ===== ✅ 关键：根据报警状态控制蜂鸣器和LED =====
-          if (Alarm_IsTriggered())
+          if (temp > temp_alarm_high)
           {
-            // 报警触发：蜂鸣器响，PF9亮
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET); // 蜂鸣器响
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET); // 报警灯亮
+            over_ratio = (temp - temp_alarm_high) / (temp_alarm_high * 0.3f);
           }
-          else
+          else if (temp < temp_alarm_low)
           {
-            // 正常：蜂鸣器关，PF9灭
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET); // 蜂鸣器关
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET); // 报警灯灭
+            over_ratio = (temp_alarm_low - temp) / (temp_alarm_low * 0.3f);
           }
 
-          // ===== 显示报警状态 =====
-          lcd_fill(20, 200, 240, 270, WHITE); // 先清空报警状态区域
+          if (over_ratio < 0)
+            over_ratio = 0;
+          if (over_ratio > 1)
+            over_ratio = 1;
 
-          if (Alarm_IsTriggered())
-          {
-            lcd_fill(20, 200, 200, 104, WHITE);
-            lcd_show_string(20, 200, 200, 24, 24, "!!! ALARM !!!", RED);
-          }
-          else
-          {
-            AlarmState_t state = Alarm_GetState();
+          // ---- 越界程度 → 呼吸步长（10~100） ----
+          uint16_t dynamic_step = 10 + (uint16_t)(over_ratio * 90);
 
-            if (state == ALARM_STATE_WARNING)
+          // ---- 呼吸算法（用动态步长） ----
+          if (breath_dir)
+          {
+            breath_pwm += dynamic_step;
+            if (breath_pwm >= BREATH_MAX)
             {
-              uint8_t cnt = Alarm_GetContinuousCount();
-              sprintf(lcd_buf, "Warning: %d/5", cnt);
-              lcd_show_string(20, 200, 200, 24, 24, lcd_buf, BLUE);
+              breath_pwm = BREATH_MAX;
+              breath_dir = 0;
             }
-            else if (state == ALARM_STATE_CLEARING)
+          }
+          else
+          {
+            if (breath_pwm > dynamic_step)
             {
-              uint8_t cnt = Alarm_GetNormalCount();
-              sprintf(lcd_buf, "Clearing: %d/3", cnt);
-              lcd_show_string(20, 200, 200, 24, 24, lcd_buf, GREEN);
+              breath_pwm -= dynamic_step;
             }
             else
             {
-              lcd_show_string(20, 200, 200, 24, 24, "Normal", BLACK);
+              breath_pwm = 0;
+              breath_dir = 1;
             }
           }
-        }
-        else
-        {
-          // 传感器错误
-          lcd_fill(20, 40, 220, 64, WHITE);
-          lcd_fill(20, 80, 220, 104, WHITE);
-          lcd_show_string(20, 40, 220, 24, 24, "Sensor Error!", BLACK);
-          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
 
-          // 传感器错误时关闭蜂鸣器
-          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
+          __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX - breath_pwm);
+
+          lcd_fill(20, 195, 240, 270, WHITE);
+
+          // 获取报警类型
+          uint8_t alarm_type = Alarm_GetType();
+          const char *type_str[] = {"", "TEMP HIGH", "TEMP LOW", "HUMI HIGH", "HUMI LOW", "BOTH"};
+
+          char alarm_buf[32];
+          sprintf(alarm_buf, "ALARM:[%s]", type_str[alarm_type]);
+          lcd_show_string(20, 200, 200, 24, 24, alarm_buf, RED);
         }
-      }    
-      //===== 解锁，释放屏幕资源 =====
-      osMutexRelease(LcdMutexHandle);
-      osDelay(500); // 500ms刷新一次屏幕，不要刷新太快
+        else 
+        {
+          // ===== ✅ 正常：红灯熄灭 =====
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+          __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX);
+
+          lcd_fill(20, 195, 240, 270, WHITE);
+
+          AlarmState_t state = Alarm_GetState();
+          if (state == ALARM_STATE_WARNING)
+          {
+            uint8_t cnt = Alarm_GetContinuousCount();
+            sprintf(lcd_buf, "Warning:%d/5", cnt);
+            lcd_show_string(20, 200, 200, 24, 24, lcd_buf, BLUE);
+          }
+          else if (state == ALARM_STATE_CLEARING)
+          {
+            uint8_t cnt = Alarm_GetNormalCount();
+            sprintf(lcd_buf, "Clearing:%d/3", cnt);
+            lcd_show_string(20, 200, 200, 24, 24, lcd_buf, GREEN);
+          }
+          else
+          {
+            lcd_fill(20, 195, 240, 270, WHITE);
+            lcd_show_string(20, 200, 200, 24, 24, "Temp Humi Normal", BLACK);
+          }
+        }
+      }
+      else
+      {
+        // ===== 传感器错误 =====
+        lcd_fill(20, 40, 220, 64, WHITE);
+        lcd_fill(20, 80, 220, 104, WHITE);
+        lcd_show_string(20, 40, 220, 24, 24, "Sensor Error!", BLACK);
+
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+
+        // 传感器错误：红灯常亮（0 = 最亮）
+        __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, 0);
+      }
+    }
+
+    osMutexRelease(LcdMutexHandle);
+    osDelay(50);
   }
   /* USER CODE END StartTask_Display */
 }
 
 /* USER CODE BEGIN Header_StartTask_RS485 */
 /**
-* @brief Function implementing the Task_RS485 thread.
-* @param argument: Not used
-* @retval None
-*/
+ * @brief Function implementing the Task_RS485 thread.
+ * @param argument: Not used
+ * @retval None
+ */
 /* USER CODE END Header_StartTask_RS485 */
 void StartTask_RS485(void const * argument)
 {
   /* USER CODE BEGIN StartTask_RS485 */
+  osEvent evt;
+  SensorMsg_t *pMsg;
+
+  // 初始化 RS485 (使用 USART2)
+  rs485_init(115200);
+
   /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    // ===== ✅ 从专用队列阻塞等待 =====
+    evt = osMessageGet(RS485QueueHandle, osWaitForever);
+
+    if (evt.status == osEventMessage)
+    {
+      pMsg = (SensorMsg_t *)evt.value.p;
+      if (pMsg->ok == 1)
+      {
+        // 立即发送 RS485 数据
+        rs485_send_frame(pMsg->temp, pMsg->humi);
+
+        // 串口调试输出
+        char buf[64];
+        sprintf(buf, "RS485 Send: T=%.1f H=%.1f\r\n", pMsg->temp, pMsg->humi);
+        HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
+      }
+    }
+
+    // 不需要 osDelay，有消息就立即处理，没消息就阻塞等待
   }
   /* USER CODE END StartTask_RS485 */
 }

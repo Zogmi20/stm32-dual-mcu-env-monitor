@@ -49,6 +49,7 @@ project\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h
 project\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
 project\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h
 project\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h
+project\main.o: ../Core/Inc/dma.h
 project\main.o: ../FATFS/App/fatfs.h
 project\main.o: ../Middlewares/Third_Party/FatFs/src/ff.h
 project\main.o: ../Middlewares/Third_Party/FatFs/src/integer.h

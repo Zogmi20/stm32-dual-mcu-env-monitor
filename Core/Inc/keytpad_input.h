@@ -1,29 +1,46 @@
-#ifndef __BSP_KEYPAD_H
-#define __BSP_KEYPAD_H
+#ifndef __KEYPAD_INPUT_H
+#define __KEYPAD_INPUT_H
 
 #include "main.h"
-#include "FreeRTOS.h"
-#include "task.h"
+#include "stdint.h"
 
-// ==================== 配置宏 ====================
-#define KEY_UP_SHORT_PRESS_TIME 50  // 短按判定时间（ms）
-#define KEY_UP_TEMP_PRESS_TIME 3000 // 长按3秒 → 温度设置
-#define KEY_UP_HUMI_PRESS_TIME 8000 // 长按8秒 → 湿度设置
-#define TPAD_TOUCH_THRESHOLD 50     // TPAD触摸阈值
+// ==================== 宏定义 ====================
+#define KEY_LONG_PRESS_TIME 3000 // 长按判定时间 3秒
+#define KEY_DEBOUNCE_TIME 50     // 消抖时间 50ms
 
-// ==================== 按键事件枚举 ====================
+// ==================== 枚举定义 ====================
 typedef enum
 {
-    KEY_EVENT_NONE = 0,
-    KEY_EVENT_UP_SHORT,
-    KEY_EVENT_UP_LONG_TEMP,
-    KEY_EVENT_UP_LONG_HUMI,
-    KEY_EVENT_TPAD_TOUCH
-} KeyEvent_t;
+    KEY_STATE_IDLE = 0,
+    KEY_STATE_DEBOUNCE,
+    KEY_STATE_PRESSED,
+    KEY_STATE_LONG_PRESS
+} KeyState_t;
+
+typedef enum
+{
+    SET_MODE_NORMAL = 0,
+    SET_MODE_TEMP_LOW,
+    SET_MODE_TEMP_HIGH,
+    SET_MODE_HUMI_LOW,
+    SET_MODE_HUMI_HIGH
+} SetMode_t;
+
+// ==================== 结构体定义 ====================
+typedef struct
+{
+    KeyState_t state;
+    uint32_t press_start_time;
+    uint8_t long_press_triggered;
+    uint8_t key_pressed;
+} Key_t;
 
 // ==================== 函数声明 ====================
-void KeyPad_Init(void);
-KeyEvent_t KeyPad_Scan(void);
 
-#endif
+void Key_Init(void);
+uint8_t Key_Scan(void);
+void Key_Process(void);
+SetMode_t Key_GetSetMode(void);
+uint16_t Key_GetSetValue(void);
 
+#endif /* __KEYPAD_INPUT_H */

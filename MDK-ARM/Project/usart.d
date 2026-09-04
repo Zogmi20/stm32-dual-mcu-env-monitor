@@ -36,3 +36,16 @@ project\usart.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_sdmmc.h
 project\usart.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h
 project\usart.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
 project\usart.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h
+project\usart.o: ../Core/Inc/rs485.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
+project\usart.o: ../Core/Inc/FreeRTOSConfig.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F/portmacro.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
+project\usart.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h
+project\usart.o: E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin\..\include\string.h
+project\usart.o: ../Core/Inc/dma.h

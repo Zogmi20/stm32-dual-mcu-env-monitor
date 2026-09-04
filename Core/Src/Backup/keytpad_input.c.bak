@@ -1,191 +1,323 @@
-#include "keytpad_input.h"
+#include "keypad_input.h"
+#include "alarm.h"
 #include "usart.h"
 #include <string.h>
+#include <stdio.h>
+
+// ==================== 外部变量 ====================
+extern float temp_alarm_high;
+extern float temp_alarm_low;
+extern float humi_alarm_high;
+extern float humi_alarm_low;
 
 // ==================== 私有变量 ====================
-// KEY_UP 状态PA0
-static uint8_t key_up_prev = 0;
-static uint32_t key_up_press_start = 0;
-static uint8_t key_up_event_sent = 0;
+static Key_t g_pa0_key = {
+    .state = KEY_STATE_IDLE,
+    .press_start_time = 0,
+    .long_press_triggered = 0,
+    .key_pressed = 0};
 
-// TPAD 状态PA5
-static uint16_t tpad_default_val = 0;
-static uint8_t tpad_init_done = 0;
-static uint8_t tpad_prev = 0;
+static SetMode_t g_set_mode = SET_MODE_NORMAL;
+static uint16_t g_set_value = 0;
+
+// 保存设置前的原始值 (用于取消)
+static float g_old_temp_high;
+static float g_old_temp_low;
+static float g_old_humi_high;
+static float g_old_humi_low;
+
+// PE2 上次状态 (用于边沿检测)
+static uint8_t g_pe2_last_state = 0;
 
 // ==================== 私有函数声明 ====================
-static void TPAD_Init(void);
-static uint16_t TPAD_GetValue(void);
-static uint8_t TPAD_Scan(void);
-
-// ==================== 蜂鸣器提示函数 ====================
-
-static void BEEP_Short(uint16_t duration_ms)
-{
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-    osDelay(duration_ms);
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-}
-
-static void BEEP_EnterTempMode(void)
-{
-    for (int i = 0; i < 3; i++)
-    {
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-        osDelay(200);
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-        osDelay(200);
-    }
-}
-
-static void BEEP_EnterHumiMode(void)
-{
-    for (int i = 0; i < 5; i++)
-    {
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-        osDelay(100);
-        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-        osDelay(100);
-    }
-}
-
-static void BEEP_SaveSuccess(void)
-{
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-    osDelay(500);
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-}
-
-static void BEEP_TPADTouch(void)
-{
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-    osDelay(30);
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-}
+static void Key_SaveAllSettings(void);
+static void Key_ExitWithoutSave(void);
+static void Key_Beep(uint16_t duration_ms);
+static void Key_EnterNextMode(void);
 
 // ==================== 公有函数实现 ====================
 
-void KeyPad_Init(void)
+void Key_Init(void)
 {
-    TPAD_Init();
+    g_pa0_key.state = KEY_STATE_IDLE;
+    g_pa0_key.press_start_time = 0;
+    g_pa0_key.long_press_triggered = 0;
+    g_pa0_key.key_pressed = 0;
+    g_set_mode = SET_MODE_NORMAL;
+    g_set_value = 0;
+    g_pe2_last_state = 0;
 
-    char buf[64];
-    sprintf(buf, "KeyPad Init OK, TPAD Default: %d\r\n", tpad_default_val);
-    HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
+    // 保存当前阈值
+    g_old_temp_high = temp_alarm_high;
+    g_old_temp_low = temp_alarm_low;
+    g_old_humi_high = humi_alarm_high;
+    g_old_humi_low = humi_alarm_low;
+
+    HAL_UART_Transmit(&huart1, (uint8_t *)"Key Init OK\r\n", 13, 100);
 }
 
-KeyEvent_t KeyPad_Scan(void)
+/**
+ * @brief  按键扫描 (非阻塞)
+ * @retval 1=PA0被按下, 0=无按键
+ */
+uint8_t Key_Scan(void)
 {
-    KeyEvent_t event = KEY_EVENT_NONE;
+    uint8_t pa0_state = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
+    uint32_t current_time = HAL_GetTick();
 
-    // ===== 1. 扫描 KEY_UP =====
-    uint8_t key_up_now = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0);
-
-    if (key_up_now == GPIO_PIN_SET)
+    if (pa0_state == GPIO_PIN_SET)
     {
-        if (!key_up_prev)
+        switch (g_pa0_key.state)
         {
-            key_up_press_start = xTaskGetTickCount();
-            key_up_event_sent = 0;
-        }
-        else
-        {
-            uint32_t press_duration = xTaskGetTickCount() - key_up_press_start;
+        case KEY_STATE_IDLE:
+            g_pa0_key.state = KEY_STATE_DEBOUNCE;
+            g_pa0_key.press_start_time = current_time;
+            g_pa0_key.long_press_triggered = 0;
+            g_pa0_key.key_pressed = 0;
+            break;
 
-            if (press_duration >= KEY_UP_HUMI_PRESS_TIME && !key_up_event_sent)
+        case KEY_STATE_DEBOUNCE:
+            if (current_time - g_pa0_key.press_start_time > KEY_DEBOUNCE_TIME)
             {
-                key_up_event_sent = 1;
-                event = KEY_EVENT_UP_LONG_HUMI;
-                BEEP_EnterHumiMode();
+                g_pa0_key.state = KEY_STATE_PRESSED;
+                g_pa0_key.press_start_time = current_time;
+                g_pa0_key.key_pressed = 1;
             }
-            else if (press_duration >= KEY_UP_TEMP_PRESS_TIME && !key_up_event_sent)
+            break;
+
+        case KEY_STATE_PRESSED:
+            // 检测长按 (3秒)
+            if (current_time - g_pa0_key.press_start_time > KEY_LONG_PRESS_TIME)
             {
-                key_up_event_sent = 1;
-                event = KEY_EVENT_UP_LONG_TEMP;
-                BEEP_EnterTempMode();
+                if (!g_pa0_key.long_press_triggered)
+                {
+                    g_pa0_key.long_press_triggered = 1;
+                    g_pa0_key.key_pressed = 2; // 长按
+                    return 1;
+                }
             }
+            break;
+
+        default:
+            break;
         }
+        return 0;
     }
     else
     {
-        if (key_up_prev)
+        // 按键释放
+        if (g_pa0_key.state == KEY_STATE_PRESSED)
         {
-            uint32_t press_duration = xTaskGetTickCount() - key_up_press_start;
-
-            if (press_duration < KEY_UP_TEMP_PRESS_TIME && !key_up_event_sent)
+            uint32_t press_duration = current_time - g_pa0_key.press_start_time;
+            // 短按: 按下时间 > 消抖时间 且 < 长按时间
+            if (!g_pa0_key.long_press_triggered &&
+                press_duration >= KEY_DEBOUNCE_TIME &&
+                press_duration < KEY_LONG_PRESS_TIME)
             {
-                event = KEY_EVENT_UP_SHORT;
-                BEEP_Short(50);
+                g_pa0_key.key_pressed = 1;
+                g_pa0_key.state = KEY_STATE_IDLE;
+                return 1;
+            }
+        }
+
+        g_pa0_key.state = KEY_STATE_IDLE;
+        g_pa0_key.long_press_triggered = 0;
+        g_pa0_key.key_pressed = 0;
+        return 0;
+    }
+}
+
+/**
+ * @brief  处理按键事件
+ */
+void Key_Process(void)
+{
+    uint8_t pa0_pressed = Key_Scan();
+    uint8_t pe2_state = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_2);
+
+    // ===== 处理 PE2 (ADD键) - 边沿检测 =====
+    if (pe2_state == GPIO_PIN_SET && g_pe2_last_state == GPIO_PIN_RESET)
+    {
+        // PE2 上升沿触发
+        if (g_set_mode != SET_MODE_NORMAL)
+        {
+            // 在设置模式下，PE2 用于增加值
+            switch (g_set_mode)
+            {
+            case SET_MODE_TEMP_LOW:
+            case SET_MODE_TEMP_HIGH:
+                if (g_set_value < 99)
+                    g_set_value += 1;
+                Key_Beep(30);
+                break;
+
+            case SET_MODE_HUMI_LOW:
+            case SET_MODE_HUMI_HIGH:
+                if (g_set_value < 100)
+                    g_set_value += 5;
+                if (g_set_value > 100)
+                    g_set_value = 100;
+                Key_Beep(30);
+                break;
+
+            default:
+                break;
+            }
+
+            char buf[32];
+            sprintf(buf, "Set: %d\r\n", g_set_value);
+            HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
+        }
+    }
+    g_pe2_last_state = pe2_state;
+
+    // ===== 处理 PA0 (SET键) =====
+    if (pa0_pressed)
+    {
+        if (g_pa0_key.key_pressed == 2) // 长按 (3秒)
+        {
+            if (g_set_mode == SET_MODE_NORMAL)
+            {
+                // ===== 从正常模式进入设置模式 =====
+                g_set_mode = SET_MODE_TEMP_LOW;
+                g_set_value = (uint16_t)temp_alarm_low;
+                g_old_temp_low = temp_alarm_low;
+                g_old_temp_high = temp_alarm_high;
+                g_old_humi_low = humi_alarm_low;
+                g_old_humi_high = humi_alarm_high;
+
+                Key_Beep(150);
+                HAL_UART_Transmit(&huart1, (uint8_t *)"Enter Set Mode\r\n", 16, 100);
+            }
+            else
+            {
+                // ===== 在设置模式下长按 → 取消并退出 =====
+                Key_ExitWithoutSave();
+                Key_Beep(100);
+                HAL_Delay(100);
+                Key_Beep(100); // 两声表示取消
+
+                HAL_UART_Transmit(&huart1, (uint8_t *)"Exit Set Mode (Cancel)\r\n", 25, 100);
+            }
+        }
+        else if (g_pa0_key.key_pressed == 1) // 短按 (确认)
+        {
+            if (g_set_mode != SET_MODE_NORMAL)
+            {
+                // 进入下一步 或 保存
+                Key_EnterNextMode();
             }
         }
     }
-    key_up_prev = key_up_now;
+}
 
-    // ===== 2. 扫描 TPAD =====
-    if (event == KEY_EVENT_NONE)
-    {
-        uint8_t tpad_now = TPAD_Scan();
+SetMode_t Key_GetSetMode(void)
+{
+    return g_set_mode;
+}
 
-        if (tpad_now && !tpad_prev)
-        {
-            event = KEY_EVENT_TPAD_TOUCH;
-            BEEP_TPADTouch();
-        }
-        tpad_prev = tpad_now;
-    }
-
-    return event;
+uint16_t Key_GetSetValue(void)
+{
+    return g_set_value;
 }
 
 // ==================== 私有函数实现 ====================
 
-static void TPAD_Init(void)
+/**
+ * @brief  进入下一个设置模式
+ */
+static void Key_EnterNextMode(void)
 {
-    uint32_t sum = 0;
-    for (int i = 0; i < 5; i++)
+    // 保存当前设置的值
+    switch (g_set_mode)
     {
-        sum += TPAD_GetValue();
-        osDelay(10);
+    case SET_MODE_TEMP_LOW:
+        temp_alarm_low = (float)g_set_value;
+        g_set_mode = SET_MODE_TEMP_HIGH;
+        g_set_value = (uint16_t)temp_alarm_high;
+        Key_Beep(80);
+        break;
+
+    case SET_MODE_TEMP_HIGH:
+        temp_alarm_high = (float)g_set_value;
+        g_set_mode = SET_MODE_HUMI_LOW;
+        g_set_value = (uint16_t)humi_alarm_low;
+        Key_Beep(80);
+        break;
+
+    case SET_MODE_HUMI_LOW:
+        humi_alarm_low = (float)g_set_value;
+        g_set_mode = SET_MODE_HUMI_HIGH;
+        g_set_value = (uint16_t)humi_alarm_high;
+        Key_Beep(80);
+        break;
+
+    case SET_MODE_HUMI_HIGH:
+        humi_alarm_high = (float)g_set_value;
+        // 保存完成
+        Key_SaveAllSettings();
+        break;
+
+    default:
+        break;
     }
-    tpad_default_val = sum / 5;
-    tpad_init_done = 1;
+
+    char buf[64];
+    sprintf(buf, "Mode:%d, Value:%d\r\n", g_set_mode, g_set_value);
+    HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
 }
 
-static uint16_t TPAD_GetValue(void)
+/**
+ * @brief  保存所有设置
+ */
+static void Key_SaveAllSettings(void)
 {
-    uint16_t count = 0;
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    GPIO_InitStruct.Pin = GPIO_PIN_5;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    osDelay(1);
-
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    while (!HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5))
+    // 检查温度上下限是否合理
+    if (temp_alarm_low >= temp_alarm_high)
     {
-        count++;
-        if (count > 5000)
-            break;
+        temp_alarm_low = temp_alarm_high - 5.0f;
+        if (temp_alarm_low < 0)
+            temp_alarm_low = 0;
     }
 
-    return count;
+    if (humi_alarm_low >= humi_alarm_high)
+    {
+        humi_alarm_low = humi_alarm_high - 20.0f;
+        if (humi_alarm_low < 0)
+            humi_alarm_low = 0;
+    }
+
+    g_set_mode = SET_MODE_NORMAL;
+    Key_Beep(800); // 长响表示保存成功
+
+    char buf[64];
+    sprintf(buf, "Saved! T:%.1f~%.1f, H:%.1f~%.1f\r\n",
+            temp_alarm_low, temp_alarm_high,
+            humi_alarm_low, humi_alarm_high);
+    HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
 }
 
-static uint8_t TPAD_Scan(void)
+/**
+ * @brief  取消并退出设置 (不保存)
+ */
+static void Key_ExitWithoutSave(void)
 {
-    if (!tpad_init_done)
-        return 0;
+    // 恢复旧值
+    temp_alarm_low = g_old_temp_low;
+    temp_alarm_high = g_old_temp_high;
+    humi_alarm_low = g_old_humi_low;
+    humi_alarm_high = g_old_humi_high;
 
-    uint16_t current_val = TPAD_GetValue();
-    uint16_t diff = (current_val > tpad_default_val) ? (current_val - tpad_default_val) : (tpad_default_val - current_val);
+    g_set_mode = SET_MODE_NORMAL;
+    g_set_value = 0;
+}
 
-    return (diff > TPAD_TOUCH_THRESHOLD) ? 1 : 0;
+/**
+ * @brief  蜂鸣器响指定毫秒
+ */
+static void Key_Beep(uint16_t duration_ms)
+{
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+    HAL_Delay(duration_ms);
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
 }

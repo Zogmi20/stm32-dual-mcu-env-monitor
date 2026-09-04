@@ -62,3 +62,4 @@ project\freertos.o: ../Core/Inc/lcd.h
 project\freertos.o: E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin\..\include\stdlib.h
 project\freertos.o: ../Core/Inc/flash.h
 project\freertos.o: ../Core/Inc/alarm.h
+project\freertos.o: ../Core/Inc/rs485.h
