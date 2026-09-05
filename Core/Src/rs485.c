@@ -72,28 +72,13 @@ void rs485_send_data(uint8_t *buf, uint8_t len)
 // ==================== 3. 发送帧 ====================
 void rs485_send_frame(float temp, float humi)
 {
-    RS485_Frame_t frame;
-    uint8_t *p = (uint8_t *)&frame;
-    uint8_t sum = 0;
-    int i;
+    char buffer[32];
+    int len;
 
-    // 清空结构体
-    memset(&frame, 0, sizeof(RS485_Frame_t));
-
-    frame.header1 = 0xAA;
-    frame.header2 = 0x55;
-    frame.temp = temp;
-    frame.humi = humi;
-
-    for (i = 0; i < sizeof(RS485_Frame_t) - 1; i++)
-    {
-        sum += p[i];
-    }
-    frame.checksum = sum;
-
-    rs485_send_data((uint8_t *)&frame, sizeof(RS485_Frame_t));
+    // 发送文本格式: "T:32.3,H:71.0\r\n"
+    len = sprintf(buffer, "T:%.1f,H:%.1f\r\n", temp, humi);
+    rs485_send_data((uint8_t *)buffer, len);
 }
-
 // ==================== 4. 接收数据 ====================
 void rs485_receive_data(uint8_t *buf, uint8_t *len)
 {

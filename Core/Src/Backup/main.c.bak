@@ -114,8 +114,7 @@ int main(void)
   MX_TIM14_Init();
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
-  // 上电加载报警阈值，只读，不会擦写Flash，安全！
-  temp_alarm_threshold = Flash_Read_TempThreshold();
+  
   set_mode_flag = 0;
 
   /* USER CODE END 2 */

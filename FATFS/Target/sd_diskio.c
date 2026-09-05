@@ -84,6 +84,7 @@ See BSP_SD_ErrorCallback() and BSP_SD_AbortCallback() below
 * transfer data
 */
 /* USER CODE BEGIN enableScratchBuffer */
+extern UART_HandleTypeDef huart1;
 /* #define ENABLE_SCRATCH_BUFFER */
 /* USER CODE END enableScratchBuffer */
 

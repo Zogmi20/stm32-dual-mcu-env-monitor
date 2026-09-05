@@ -37,6 +37,8 @@ project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h
 project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sram.h
 project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_fsmc.h
+project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_nor.h
+project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_nand.h
 project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 project\freertos.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sd.h
@@ -64,3 +66,13 @@ project\freertos.o: ../Core/Inc/flash.h
 project\freertos.o: ../Core/Inc/alarm.h
 project\freertos.o: ../Core/Inc/rs485.h
 project\freertos.o: ../Core/Inc/keytpad_input.h
+project\freertos.o: ../FATFS/App/fatfs.h
+project\freertos.o: ../Middlewares/Third_Party/FatFs/src/ff.h
+project\freertos.o: ../Middlewares/Third_Party/FatFs/src/integer.h
+project\freertos.o: ../FATFS/Target/ffconf.h
+project\freertos.o: ../FATFS/Target/bsp_driver_sd.h
+project\freertos.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h
+project\freertos.o: ../Middlewares/Third_Party/FatFs/src/ff_gen_drv.h
+project\freertos.o: ../Middlewares/Third_Party/FatFs/src/diskio.h
+project\freertos.o: ../FATFS/Target/sd_diskio.h
+project\freertos.o: ../Core/Inc/sdio.h

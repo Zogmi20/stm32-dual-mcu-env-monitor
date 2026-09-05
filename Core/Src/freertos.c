@@ -36,7 +36,8 @@
 #include "alarm.h"
 #include "rs485.h"
 #include "keytpad_input.h"
-
+#include "fatfs.h" 
+#include "sdio.h"
 
 /* USER CODE END Includes */
 
@@ -537,13 +538,101 @@ void StartTask_RS485(void const * argument)
   osEvent evt;
   SensorMsg_t *pMsg;
 
-  // 初始化 RS485 (使用 USART2)
+  // ===== ✅ 1. 先初始化 RS485 =====
   rs485_init(115200);
+  HAL_UART_Transmit(&huart1, (uint8_t *)"RS485 Task Started\r\n", 20, 100);
+
+  // ===== ✅ 2. 延迟，让系统稳定 =====
+  osDelay(500);
+
+  // ===== ✅ 3. SD 卡相关变量 =====
+  FATFS fs;
+  FIL file;
+  FRESULT res;
+  uint32_t bytes_written;
+  uint8_t sd_ready = 0;
+  uint8_t file_opened = 0;
+
+  // ============================================================
+  // ===== ✅ 4. 强制初始化 SD 卡硬件 =====
+  // ============================================================
+  HAL_UART_Transmit(&huart1, (uint8_t *)"BSP_SD_Init Start...\r\n", 23, 100);
+
+  uint8_t sd_init_ret = BSP_SD_Init();
+  char dbg_buf[32];
+  sprintf(dbg_buf, "BSP_SD_Init ret: %d\r\n", sd_init_ret);
+  HAL_UART_Transmit(&huart1, (uint8_t *)dbg_buf, strlen(dbg_buf), 100);
+
+  if (sd_init_ret == MSD_OK)
+  {
+    HAL_UART_Transmit(&huart1, (uint8_t *)"BSP_SD_Init OK\r\n", 17, 100);
+  }
+  else
+  {
+    HAL_UART_Transmit(&huart1, (uint8_t *)"BSP_SD_Init Failed!\r\n", 22, 100);
+  }
+
+  // ===== ✅ 5. 获取 SD 卡信息 =====
+  BSP_SD_CardInfo card_info;
+  BSP_SD_GetCardInfo(&card_info);
+  sprintf(dbg_buf, "Blocks: %d, Size: %d\r\n",
+          card_info.LogBlockNbr, card_info.LogBlockSize);
+  HAL_UART_Transmit(&huart1, (uint8_t *)dbg_buf, strlen(dbg_buf), 100);
+
+  // ===== ✅ 6. 挂载 FATFS =====
+  HAL_UART_Transmit(&huart1, (uint8_t *)"f_mount...\r\n", 12, 100);
+
+  res = f_mount(&fs, "0:", 1);
+  sprintf(dbg_buf, "f_mount ret: %d\r\n", res);
+  HAL_UART_Transmit(&huart1, (uint8_t *)dbg_buf, strlen(dbg_buf), 100);
+
+  if (res == FR_OK)
+  {
+    sd_ready = 1;
+    HAL_UART_Transmit(&huart1, (uint8_t *)"SD Card Mount OK\r\n", 18, 100);
+
+    // ✅ 直接使用完整路径，不需要 f_chdir
+    res = f_open(&file, "0:sensor_data.csv", FA_CREATE_ALWAYS | FA_OPEN_APPEND | FA_WRITE);
+    if (res == FR_OK)
+    {
+      f_lseek(&file, 0);
+      if (f_size(&file) == 0)
+      {
+        f_write(&file, "Timestamp,Temperature,Humidity\r\n", 31, &bytes_written);
+        f_sync(&file);
+      }
+      file_opened = 1;
+      f_close(&file);
+      HAL_UART_Transmit(&huart1, (uint8_t *)"CSV file ready\r\n", 16, 100);
+    }
+    else
+    {
+      sprintf(dbg_buf, "f_open error: %d\r\n", res);
+      HAL_UART_Transmit(&huart1, (uint8_t *)dbg_buf, strlen(dbg_buf), 100);
+    }
+  }
+  else
+  {
+    HAL_UART_Transmit(&huart1, (uint8_t *)"SD Card Mount Failed\r\n", 22, 100);
+  }
+
+// ===== ✅ 7. 批量保存缓冲区 =====
+#define SAVE_BUF_SIZE 15
+  typedef struct
+  {
+    float temp;
+    float humi;
+    uint32_t timestamp;
+  } SaveData_t;
+
+  static SaveData_t save_buf[SAVE_BUF_SIZE];
+  static uint8_t buf_count = 0;
+  static uint32_t last_save_time = 0;
+  last_save_time = HAL_GetTick();
 
   /* Infinite loop */
   for (;;)
   {
-    // ===== ✅ 从专用队列阻塞等待 =====
     evt = osMessageGet(RS485QueueHandle, osWaitForever);
 
     if (evt.status == osEventMessage)
@@ -551,17 +640,46 @@ void StartTask_RS485(void const * argument)
       pMsg = (SensorMsg_t *)evt.value.p;
       if (pMsg->ok == 1)
       {
-        // 立即发送 RS485 数据
         rs485_send_frame(pMsg->temp, pMsg->humi);
 
-        // 串口调试输出
         char buf[64];
         sprintf(buf, "RS485 Send: T=%.1f H=%.1f\r\n", pMsg->temp, pMsg->humi);
         HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
+
+        if (sd_ready == 1 && file_opened == 1)
+        {
+          save_buf[buf_count].temp = pMsg->temp;
+          save_buf[buf_count].humi = pMsg->humi;
+          save_buf[buf_count].timestamp = HAL_GetTick() / 1000;
+          buf_count++;
+
+          uint32_t now = HAL_GetTick();
+          if (buf_count >= SAVE_BUF_SIZE || (now - last_save_time) >= 30000)
+          {
+            res = f_open(&file, "0:sensor_data.csv", FA_OPEN_APPEND | FA_WRITE);
+            if (res == FR_OK)
+            {
+              for (int i = 0; i < buf_count; i++)
+              {
+                sprintf(buf, "%lu,%.1f,%.1f\r\n",
+                        save_buf[i].timestamp,
+                        save_buf[i].temp,
+                        save_buf[i].humi);
+                f_write(&file, (uint8_t *)buf, strlen(buf), &bytes_written);
+              }
+              f_sync(&file);
+              f_close(&file);
+
+              sprintf(buf, "SD Saved %d records\r\n", buf_count);
+              HAL_UART_Transmit(&huart1, (uint8_t *)buf, strlen(buf), 100);
+
+              buf_count = 0;
+              last_save_time = now;
+            }
+          }
+        }
       }
     }
-
-    // 不需要 osDelay，有消息就立即处理，没消息就阻塞等待
   }
   /* USER CODE END StartTask_RS485 */
 }
