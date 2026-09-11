@@ -22,16 +22,19 @@ Dialog DLL:      TCM.DLL V1.53.0.0
  
 <h2>Project:</h2>
 E:\Project\MDK-ARM\Project.uvprojx
-Project File Date:  09/05/2026
+Project File Date:  09/11/2026
 
 <h2>Output:</h2>
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'E:\Embeded_Tool\MDK\Core\ARM\ARMCC\Bin'
 Build target 'Project'
-compiling freertos.c...
+compiling keytpad_input.c...
+..\Core\Src\keytpad_input.c(25): warning:  #550-D: variable "g_pa0_key_up"  was set but never used
+  static uint8_t g_pa0_key_up = 0;
+..\Core\Src\keytpad_input.c: 1 warning, 0 errors
 linking...
-Program Size: Code=52992 RO-data=14144 RW-data=280 ZI-data=18568  
+Program Size: Code=55012 RO-data=14208 RW-data=300 ZI-data=18820  
 FromELF: creating hex file...
-"Project\Project.axf" - 0 Error(s), 0 Warning(s).
+"Project\Project.axf" - 0 Error(s), 1 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -55,7 +58,7 @@ Package Vendor: Keil
 
    * Component: ARM::CMSIS:CORE:5.5.0
       Include file:  CMSIS\Core\Include\tz_context.h
-Build Time Elapsed:  00:00:04
+Build Time Elapsed:  00:00:03
 </pre>
 </body>
 </html>

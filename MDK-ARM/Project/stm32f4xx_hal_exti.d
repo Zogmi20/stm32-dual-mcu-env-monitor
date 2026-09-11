@@ -27,8 +27,6 @@ project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_
 project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sram.h
 project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_fsmc.h
-project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_nor.h
-project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_nand.h
 project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 project\stm32f4xx_hal_exti.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sd.h

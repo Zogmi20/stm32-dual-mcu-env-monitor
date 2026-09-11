@@ -28,8 +28,6 @@ project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sram.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_fsmc.h
-project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_nor.h
-project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_nand.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sd.h
@@ -65,6 +63,7 @@ project\main.o: ../Core/Inc/sdio.h
 project\main.o: ../Core/Inc/tim.h
 project\main.o: ../Core/Inc/usart.h
 project\main.o: ../Core/Inc/gpio.h
+project\main.o: ../Core/Inc/fsmc.h
 project\main.o: ../SYSTEM/Inc/delay.h
 project\main.o: ../SYSTEM/Inc/sys.h
 project\main.o: ../Drivers/CMSIS/Include/core_cm4.h

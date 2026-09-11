@@ -25,6 +25,7 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
+#include "fsmc.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -69,7 +70,7 @@ void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN 0 */
 int fputc(int ch, FILE *f)
 {
-  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
   return ch;
 }
 /* USER CODE END 0 */
@@ -110,9 +111,9 @@ int main(void)
   MX_USART2_UART_Init();
   MX_FATFS_Init();
   MX_TIM14_Init();
+  MX_FSMC_Init();
   /* USER CODE BEGIN 2 */
   delay_init(168); // 168MHz
-  
   set_mode_flag = 0;
 
   /* USER CODE END 2 */
@@ -129,14 +130,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    
 
-    /* USER CODE BEGIN 2 */
-
-    /* USER CODE END 2 */
-
-  }
+    
     /* USER CODE END WHILE */
-
+	}
     /* USER CODE BEGIN 3 */
   
   /* USER CODE END 3 */

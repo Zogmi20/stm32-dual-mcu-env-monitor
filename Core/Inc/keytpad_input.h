@@ -38,7 +38,6 @@ typedef struct
 // ==================== 函数声明 ====================
 
 void Key_Init(void);
-uint8_t Key_Scan(void);
 void Key_Process(void);
 SetMode_t Key_GetSetMode(void);
 uint16_t Key_GetSetValue(void);

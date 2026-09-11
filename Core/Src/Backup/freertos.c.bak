@@ -68,8 +68,17 @@ typedef struct
 
 
 //====新增轮换缓冲区，3块足够
-static SensorMsg_t gMsgPool[5];
-static uint8_t poolIndex = 0;
+static SensorMsg_t gMsgPoolSensor[5]; // 专供 Display
+static SensorMsg_t gMsgPoolRS485[5];  // 专供 RS485
+static uint8_t idxSensor = 0;
+static uint8_t idxRS485 = 0;
+
+typedef struct
+{
+  float temp;
+  float humi;
+  uint8_t ok;
+} SensorData_t;
 
 //====温湿度独立报警阈值====
 //====温湿度报警阈值 (大棚用)====
@@ -87,14 +96,24 @@ typedef enum
   MODE_SET_HUMI    // 设置湿度阈值模式
 } SystemMode_t;
 
-// 全局状态变量
+#define RX_BUF_SIZE 128
+uint8_t rx_byte;             // 单字节接收缓存
+uint8_t rx_buf[RX_BUF_SIZE]; // 整帧缓存
+uint16_t rx_index = 0;       // 当前写入位置
+uint8_t rx_frame_ready = 0;  // 一帧接收完成标志
+
+extern volatile uint16_t u1_rx_len; // 引用 usart.c 里的全局变量
+extern uint8_t u1_rx_buf[];
+extern volatile uint8_t u1_frame_ready;
+extern void Reset_Uart(void);
+#define USART1_RX_BUF_SIZE 128 // 全局状态变量
 // static SystemMode_t sys_mode = MODE_NORMAL;
 // static uint8_t setting_choice = 0; // 0=温度, 1=湿度
 
-//全局变量版本
-// float g_temperature = 0.0f;
-// float g_humidity = 0.0f;
-// uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
+// 全局变量版本
+//  float g_temperature = 0.0f;
+//  float g_humidity = 0.0f;
+//  uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
 
 osMessageQId RS485QueueHandle;
 /* USER CODE END Variables */
@@ -106,7 +125,28 @@ osMutexId LcdMutexHandle;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+uint8_t USART1_GetSensorData(SensorData_t *out)
+{
+  if (!u1_frame_ready)
+    return 0; /* 没有新帧，直接返回 */
 
+  u1_frame_ready = 0;
+
+  /* 补字符串结束符，方便 sscanf */
+  if (u1_rx_len < USART1_RX_BUF_SIZE)
+    u1_rx_buf[u1_rx_len] = '\0';
+
+  /* 解析 "#T=%f,H=%f" */
+  if (sscanf((char *)u1_rx_buf, "#T=%f,H=%f", &out->temp, &out->humi) == 2)
+    out->ok = 1;
+  else
+    out->ok = 0;
+
+  /* 处理完，重启接收，等下一帧 */
+  Reset_Uart();
+
+  return 1; /* 处理了一帧 */
+}
 /* USER CODE END FunctionPrototypes */
 
 void StartTask_ReadSensor(void const * argument);
@@ -198,57 +238,55 @@ void MX_FREERTOS_Init(void) {
 void StartTask_ReadSensor(void const * argument)
 {
   /* USER CODE BEGIN StartTask_ReadSensor */
+  SensorData_t sd;
   float temp = 0.0f, humi = 0.0f;
+  uint8_t parse_ok;
   char buffer[64];
   uint8_t ret;
-  DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
+  // DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
  
   /* Infinite loop */
   for(;;)
   {
     //================================ DHT11温湿度传感器
-    // ===== 临界区保护 DHT11 读取（禁用任务切换） =====
-    // taskENTER_CRITICAL();//全局变量的互斥锁在队列不需要用
-    ret = DHT11_Read(&temp, &humi);
-    // taskEXIT_CRITICAL(); // 全局变量的互斥锁在队列不需要用
+    // // ===== 临界区保护 DHT11 读取（禁用任务切换） =====
+    // // taskENTER_CRITICAL();//全局变量的互斥锁在队列不需要用
+    // ret = DHT11_Read(&temp, &humi);
+    // // taskEXIT_CRITICAL(); // 全局变量的互斥锁在队列不需要用
     // =================================================
-    // 取一块全局缓存
-    SensorMsg_t *pMsg = &gMsgPool[poolIndex];
-    if (ret == 0)
+    if (USART1_GetSensorData(&sd))
     {
-      // 全局变量版本
-      //  g_temperature = temp;
-      //  g_humidity = humi;
-      //  g_sensor_ok = 1;
-      // 取一块全局缓存
-      pMsg->ok = 1;
-      pMsg->temp = temp;
-      pMsg->humi = humi;
+      if (sd.ok)
+      {
+        /* ===== Display 池 ===== */
+        SensorMsg_t *pS = &gMsgPoolSensor[idxSensor];
+        pS->ok = 1;
+        pS->temp = sd.temp;
+        pS->humi = sd.humi;
+        osMessagePut(SensorQueueHandle, (uint32_t)pS, 10);
+        idxSensor = (idxSensor + 1) % 5; // ← 轮换
 
-      // 等待10个tick，队列满不会立刻丢弃
-      osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
-      osMessagePut(RS485QueueHandle, (uint32_t)pMsg, 10);
+        /* ===== RS485 池 ===== */
+        SensorMsg_t *pR = &gMsgPoolRS485[idxRS485];
+        pR->ok = 1;
+        pR->temp = sd.temp;
+        pR->humi = sd.humi;
+        osMessagePut(RS485QueueHandle, (uint32_t)pR, 10);
+        idxRS485 = (idxRS485 + 1) % 5; // ← 轮换
 
-      sprintf(buffer, "Temp: %.1fC, Humi: %.1f%%\r\n", temp, humi);
-      HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
-      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_RESET);
+        sprintf(buffer, "Board1: T=%.1f H=%.1f\r\n", sd.temp, sd.humi);
+        HAL_UART_Transmit(&huart1, (uint8_t *)buffer, strlen(buffer), 100);
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_RESET);
+      }
+      else
+      {
+        HAL_UART_Transmit(&huart1, (uint8_t *)"Parse fail\r\n", 12, 100);
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
+      }
     }
-    else
-    {
-      // 全局变量版本
-      //  g_sensor_ok = 0;
-      // 读取失败！也发送消息，标记错误
-      pMsg->ok = 0;
-      osMessagePut(SensorQueueHandle, (uint32_t)pMsg, 10);
-      osMessagePut(RS485QueueHandle, (uint32_t)pMsg, 10);
-      HAL_UART_Transmit(&huart1, (uint8_t *)"Read Error\r\n", 13, 100);
-      HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
+
+    osDelay(10); // FreeRTOS的延时函数
     }
-    // 轮换缓存下标
-    poolIndex = (poolIndex + 1) % 5;
-    // DHT11要求间隔 >= 1秒，这里用2秒
-    osDelay(2000); // FreeRTOS的延时函数
-  }
   /* USER CODE END StartTask_ReadSensor */
 }
 
@@ -297,7 +335,7 @@ void StartTask_Display(void const * argument)
 
   lcd_show_string(20, 15, 200, 24, 24, "ENV MONITOR", BLUE);
   lcd_show_string(20, 274, 200, 16, 16, "PA0=SET PE2=ADD PE4=SUB", BLACK);
-
+  static SetMode_t prev_mode = SET_MODE_NORMAL;
   for (;;)
   {
     evt = osMessageGet(SensorQueueHandle, osWaitForever);
@@ -308,10 +346,16 @@ void StartTask_Display(void const * argument)
       pMsg = (SensorMsg_t *)evt.value.p;
       if (pMsg->ok == 1)
       {
+        
         // ============================================================
         // ===== 🔧 第一步：检查是否处于设置模式（优先级最高） =====
         // ============================================================
         SetMode_t set_mode = Key_GetSetMode();
+
+        /* 记住是不是刚从设置模式退出 */
+        uint8_t just_exit_set = (prev_mode != SET_MODE_NORMAL && set_mode == SET_MODE_NORMAL);
+        prev_mode = set_mode; /* 更新 prev_mode */
+
 
         if (set_mode != SET_MODE_NORMAL)
         {
@@ -327,11 +371,6 @@ void StartTask_Display(void const * argument)
             // ============================================================
             // ===== 设置模式界面 =====
             // ============================================================
-            // lcd_fill(20, 40, 220, 64, WHITE);
-            // lcd_fill(20, 80, 220, 104, WHITE);
-            // lcd_fill(20, 120, 220, 144, WHITE);
-            // lcd_fill(20, 160, 220, 184, WHITE);
-            // lcd_fill(20, 200, 220, 224, WHITE);
             // 一次性清空 y=40~266 所有数据区域
             lcd_fill(20, 40, 220, 224, WHITE);
 
@@ -345,16 +384,16 @@ void StartTask_Display(void const * argument)
             lcd_show_string(20, 80, 200, 24, 24, set_buf, BLUE);
 
             lcd_show_string(20, 250, 200, 16, 16, "Long PA0=Cancel", BLACK);
+
             // ✅ 更新记录
             last_set_mode = set_mode;
             last_set_value = current_value;
           }
-            // ===== 设置模式下：屏蔽报警（红灯熄灭） =====
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-            __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX);
+          
+          // ===== 设置模式下：屏蔽报警（红灯熄灭） =====
+          HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+          __HAL_TIM_SET_COMPARE(&htim14, TIM_CHANNEL_1, BREATH_MAX);
 
-            // 跳过正常模式的报警检测和呼吸灯
-            // 直接跳到 osMutexRelease
           }
         else
         {
@@ -370,6 +409,11 @@ void StartTask_Display(void const * argument)
           uint8_t alarm_state = Alarm_IsTriggered();
           uint8_t need_refresh = 0;
 
+          /* ★ 刚退出设置模式，强制刷新 */
+          if (just_exit_set)
+          {
+            need_refresh = 1;
+          }
           if (pMsg->temp != last_temp || pMsg->humi != last_humi)
           {
             need_refresh = 1;
@@ -382,11 +426,6 @@ void StartTask_Display(void const * argument)
           if (need_refresh)
           {
             // ===== LCD 显示 =====
-            // lcd_fill(20, 40, 220, 64, WHITE);
-            // lcd_fill(20, 80, 220, 104, WHITE);
-            // lcd_fill(20, 120, 220, 144, WHITE);
-            // lcd_fill(20, 160, 220, 184, WHITE);
-            // lcd_fill(20, 250, 220, 266, WHITE);
             // 一次性清空 y=40~266 所有数据区域
             lcd_fill(20, 40, 220, 266, WHITE);
 
@@ -502,6 +541,7 @@ void StartTask_Display(void const * argument)
               }
             }
           } // ===== 正常模式结束 =====
+          
       }
       else
       {
@@ -520,7 +560,7 @@ void StartTask_Display(void const * argument)
     osMutexRelease(LcdMutexHandle);
     // ===== 按键扫描（互斥锁释放之后） =====
     Key_Process();
-    osDelay(200);
+    osDelay(10);
   }
   /* USER CODE END StartTask_Display */
 }
@@ -549,7 +589,6 @@ void StartTask_RS485(void const * argument)
   FATFS fs;
   FIL file;
   FRESULT res;
-  char buf[64];
   uint32_t bytes_written;
   uint8_t sd_ready = 0;
   uint8_t file_opened = 0;
@@ -593,7 +632,7 @@ void StartTask_RS485(void const * argument)
     HAL_UART_Transmit(&huart1, (uint8_t *)"SD Card Mount OK\r\n", 18, 100);
 
     // ✅ 直接使用完整路径，不需要 f_chdir
-    res = f_open(&file, "0:sensor_data.csv",  FA_CREATE_ALWAYS|FA_OPEN_APPEND  |FA_WRITE );
+    res = f_open(&file, "0:sensor_data.csv", FA_CREATE_ALWAYS | FA_OPEN_APPEND | FA_WRITE);
     if (res == FR_OK)
     {
       f_lseek(&file, 0);

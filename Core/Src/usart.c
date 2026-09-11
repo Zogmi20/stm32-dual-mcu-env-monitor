@@ -28,36 +28,52 @@
 extern uint8_t g_RS485_rx_buf[];
 extern uint8_t g_RS485_rx_cnt;
 
+
+/* ===== USART1 接收（板1数据）相关变量，放这里 ===== */
+#define USART1_RX_BUF_SIZE 128
+uint8_t u1_rx_buf[USART1_RX_BUF_SIZE];
+uint16_t u1_rx_index = 0;
+volatile uint16_t u1_rx_len = 0; /* 本帧实际收到多少字节 */
+volatile uint8_t u1_frame_ready = 0;
+volatile uint8_t u1_overflow = 0;
+
+void Reset_Uart(void)
+{
+  HAL_UARTEx_ReceiveToIdle_IT(&huart1, u1_rx_buf, USART1_RX_BUF_SIZE);
+}
+
 // ===== DMA 接收完成回调 =====
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-  if (huart->Instance == USART2)
+  // if (huart->Instance == USART2)
+  // {
+  //   // DMA 接收完成，数据已在 g_RS485_rx_buf 中,可在这里添加数据处理逻辑
+  // }
+  if (huart->Instance == USART1)
   {
-    // DMA 接收完成，数据已在 g_RS485_rx_buf 中
-    // 可在这里添加数据处理逻辑
+    u1_rx_len = Size;  
+    u1_frame_ready = 1; 
   }
-}
 
-// ===== DMA 半完成回调（可选） =====
-void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart->Instance == USART2)
+}
+  // ===== DMA 半完成回调（可选） =====
+  void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef * huart)
   {
-    // 半完成中断，可用于双缓冲
+    if (huart->Instance == USART2)
+    {
+      // 半完成中断，可用于双缓冲
+    }
   }
-}
 
-// ===== DMA 发送完成回调 =====
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart->Instance == USART2)
+  // ===== DMA 发送完成回调 =====
+  void HAL_UART_TxCpltCallback(UART_HandleTypeDef * huart)
   {
-    // DMA 发送完成
-    // RS485 发送完成后的处理在 rs485_send_data 中完成
+    if (huart->Instance == USART2)
+    {
+      // DMA 发送完成
+      // RS485 发送完成后的处理在 rs485_send_data 中完成
+    }
   }
-}
-
-
 
 /* USER CODE END 0 */
 
@@ -89,6 +105,7 @@ void MX_USART1_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USART1_Init 2 */
+    Reset_Uart();
   /* USER CODE END USART1_Init 2 */
 
 }
@@ -142,17 +159,20 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+    /* USART1 interrupt Init */
+    HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
   /* USER CODE BEGIN USART1_MspInit 1 */
   /* USER CODE END USART1_MspInit 1 */
   }
   else if(uartHandle->Instance==USART2)
   {
   /* USER CODE BEGIN USART2_MspInit 0 */
-  // ===== 3. GPIOG 时钟 (PG8 RE/DE 控制) =====
-  __HAL_RCC_GPIOG_CLK_ENABLE(); // ← 添加！
+      // ===== 3. GPIOG 时钟 (PG8 RE/DE 控制) =====
+      __HAL_RCC_GPIOG_CLK_ENABLE(); // ← 添加！
 
-  // ===== 4. DMA1 时钟 =====
-  __HAL_RCC_DMA1_CLK_ENABLE();
+      // ===== 4. DMA1 时钟 =====
+      __HAL_RCC_DMA1_CLK_ENABLE();
   /* USER CODE END USART2_MspInit 0 */
     /* USART2 clock enable */
     __HAL_RCC_USART2_CLK_ENABLE();
@@ -231,13 +251,15 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
     */
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_9|GPIO_PIN_10);
 
+    /* USART1 interrupt Deinit */
+    HAL_NVIC_DisableIRQ(USART1_IRQn);
   /* USER CODE BEGIN USART1_MspDeInit 1 */
   /* USER CODE END USART1_MspDeInit 1 */
   }
   else if(uartHandle->Instance==USART2)
   {
   /* USER CODE BEGIN USART2_MspDeInit 0 */
-  
+
   /* USER CODE END USART2_MspDeInit 0 */
     /* Peripheral clock disable */
     __HAL_RCC_USART2_CLK_DISABLE();
