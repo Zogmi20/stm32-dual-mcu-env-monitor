@@ -23,6 +23,8 @@ static float g_old_temp_low;
 static float g_old_humi_high;
 static float g_old_humi_low;
 static uint8_t g_pa0_key_up = 0;
+static volatile uint8_t g_pa0_irq_flag = 0;
+static volatile uint32_t g_pa0_irq_tick = 0;
 // PE2/PE4 上次状态 (用于边沿检测)
 static uint8_t g_pe2_last_state = 0;
 static uint8_t g_pe4_last_state = 0;
@@ -32,7 +34,14 @@ static void Key_Beep(uint16_t duration_ms);
 static void Key_EnterNextMode(void);
 static void Key_ApplySetValue(uint16_t value);
     // ==================== 公有函数实现 ====================
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == GPIO_PIN_0)
+    {
+        g_pa0_irq_flag = 1;
+        g_pa0_irq_tick = HAL_GetTick();
+    }
+}
 void Key_Init(void)
 {
   
@@ -53,39 +62,32 @@ void Key_Init(void)
 }
 
 /**
- * @brief  PA0 按键扫描 (非阻塞)
- * @retval 1=有按键事件, 0=无
- */
-uint8_t Key_Scan(uint8_t mode)
-{
-    uint8_t keyval = 0;
-
-    if (mode)
-        g_pa0_key_up = 1;
-
-    if (g_pa0_key_up && (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET))
-    {
-        osDelay(10);
-        g_pa0_key_up = 0;
-
-        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
-            keyval = 1;
-    }
-    else if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
-    {
-        g_pa0_key_up = 1;
-    }
-
-    return keyval;
-}
-/**
  * @brief  按键处理主函数 (在 Display 任务中循环调用)
  */
 void Key_Process(void)
 {
-    uint32_t current_time = HAL_GetTick(); // 供 PE 消抖用
+    uint32_t current_time = HAL_GetTick();
 
-    uint8_t pa0_event = Key_Scan(0); // 内部已含 10ms 消抖
+    // ===== PA0 中断标志消费 =====
+    uint8_t pa0_event = 0;
+    static uint32_t last_pa0_tick = 0;
+
+    if (g_pa0_irq_flag)
+    {
+        g_pa0_irq_flag = 0;
+
+        if (current_time - last_pa0_tick > 20) // 20ms 消抖
+        {
+            last_pa0_tick = current_time;
+            g_pa0_key_up = 0; // ★ 必须松手才能再触发
+            pa0_event = 1;
+        }
+    }
+    // ★ 松手复位
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET)
+    {
+        g_pa0_key_up = 1;
+    }
     uint8_t pe2_state = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_2);
     uint8_t pe4_state = HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_4);
 

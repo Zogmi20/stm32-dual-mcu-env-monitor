@@ -28,6 +28,7 @@ project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash
 project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sram.h
 project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_fsmc.h
+project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_iwdg.h
 project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 project\bsp_driver_sd.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sd.h

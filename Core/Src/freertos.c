@@ -115,11 +115,23 @@ extern void Reset_Uart(void);
 //  float g_humidity = 0.0f;
 //  uint8_t g_sensor_ok = 0; // 0=失败, 1=成功
 
+//看门狗任务标志位
+#define TASK_READ_SENSOR_BIT (1 << 0)
+#define TASK_DISPLAY_BIT (1 << 1)
+#define TASK_RS485_BIT (1 << 2)
+#define ALL_TASK_BITS (TASK_READ_SENSOR_BIT | TASK_DISPLAY_BIT | TASK_RS485_BIT)
+
+static volatile uint32_t g_task_alive_flags = 0;
+volatile uint32_t g_wdg_feed_count = 0; // 调试用
+extern IWDG_HandleTypeDef hiwdg;
+/* USER CODE END Variables */
+
 osMessageQId RS485QueueHandle;
 /* USER CODE END Variables */
 osThreadId Task_ReadSensorHandle;
 osThreadId Task_DisplayHandle;
 osThreadId Task_RS485Handle;
+osThreadId WatchdogTaskHandle;
 osMessageQId SensorQueueHandle;
 osMutexId LcdMutexHandle;
 
@@ -152,6 +164,7 @@ uint8_t USART1_GetSensorData(SensorData_t *out)
 void StartTask_ReadSensor(void const * argument);
 void StartTask_Display(void const * argument);
 void StartTask_RS485(void const * argument);
+void StartWatchdogTask(void const * argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -222,6 +235,10 @@ void MX_FREERTOS_Init(void) {
   osThreadDef(Task_RS485, StartTask_RS485, osPriorityNormal, 0, 512);
   Task_RS485Handle = osThreadCreate(osThread(Task_RS485), NULL);
 
+  /* definition and creation of WatchdogTask */
+  osThreadDef(WatchdogTask, StartWatchdogTask, osPriorityLow, 0, 128);
+  WatchdogTaskHandle = osThreadCreate(osThread(WatchdogTask), NULL);
+
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
@@ -284,7 +301,7 @@ void StartTask_ReadSensor(void const * argument)
         HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET);
       }
     }
-
+    g_task_alive_flags |= TASK_READ_SENSOR_BIT;
     osDelay(10); // FreeRTOS的延时函数
     }
   /* USER CODE END StartTask_ReadSensor */
@@ -337,6 +354,7 @@ void StartTask_Display(void const * argument)
   lcd_show_string(20, 274, 200, 16, 16, "PA0=SET PE2=ADD PE4=SUB", BLACK);
   static SetMode_t prev_mode = SET_MODE_NORMAL;
   for (;;)
+
   {
     // evt = osMessageGet(SensorQueueHandle, osWaitForever);
     evt = osMessageGet(SensorQueueHandle, 1000); // 最多等 10s
@@ -561,6 +579,7 @@ void StartTask_Display(void const * argument)
     osMutexRelease(LcdMutexHandle);
     // ===== 按键扫描（互斥锁释放之后） =====
     Key_Process();
+    g_task_alive_flags |= TASK_DISPLAY_BIT;
     osDelay(10);
   }
   /* USER CODE END StartTask_Display */
@@ -674,8 +693,8 @@ void StartTask_RS485(void const * argument)
   /* Infinite loop */
   for (;;)
   {
-    evt = osMessageGet(RS485QueueHandle, osWaitForever);
-
+    evt = osMessageGet(RS485QueueHandle, 1000);
+    g_task_alive_flags |= TASK_RS485_BIT;
     if (evt.status == osEventMessage)
     {
       pMsg = (SensorMsg_t *)evt.value.p;
@@ -723,6 +742,31 @@ void StartTask_RS485(void const * argument)
     }
   }
   /* USER CODE END StartTask_RS485 */
+}
+
+/* USER CODE BEGIN Header_StartWatchdogTask */
+/**
+* @brief Function implementing the WatchdogTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartWatchdogTask */
+void StartWatchdogTask(void const * argument)
+{
+  /* USER CODE BEGIN StartWatchdogTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    // 所有任务都报到过，才喂狗
+    if (g_task_alive_flags == ALL_TASK_BITS)
+    {
+      g_task_alive_flags = 0;
+      HAL_IWDG_Refresh(&hiwdg);
+      g_wdg_feed_count++; // 调试计数
+    }
+    osDelay(1000);
+  }
+  /* USER CODE END StartWatchdogTask */
 }
 
 /* Private application code --------------------------------------------------*/

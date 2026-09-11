@@ -62,7 +62,6 @@ float temp_alarm_threshold;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
-
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -135,9 +134,7 @@ int main(void)
 
     
     /* USER CODE END WHILE */
-  }
-    /* USER CODE END WHILE */
-
+	}
     /* USER CODE BEGIN 3 */
   
   /* USER CODE END 3 */

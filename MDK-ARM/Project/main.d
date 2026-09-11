@@ -28,6 +28,7 @@ project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ex.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_flash_ramfunc.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sram.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_fsmc.h
+project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_iwdg.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h
 project\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_sd.h
@@ -59,6 +60,7 @@ project\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.h
 project\main.o: ../Middlewares/Third_Party/FatFs/src/ff_gen_drv.h
 project\main.o: ../Middlewares/Third_Party/FatFs/src/diskio.h
 project\main.o: ../FATFS/Target/sd_diskio.h
+project\main.o: ../Core/Inc/iwdg.h
 project\main.o: ../Core/Inc/sdio.h
 project\main.o: ../Core/Inc/tim.h
 project\main.o: ../Core/Inc/usart.h

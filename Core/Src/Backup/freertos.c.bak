@@ -338,7 +338,8 @@ void StartTask_Display(void const * argument)
   static SetMode_t prev_mode = SET_MODE_NORMAL;
   for (;;)
   {
-    evt = osMessageGet(SensorQueueHandle, osWaitForever);
+    // evt = osMessageGet(SensorQueueHandle, osWaitForever);
+    evt = osMessageGet(SensorQueueHandle, 1000); // 最多等 10s
     osMutexWait(LcdMutexHandle, osWaitForever);
 
     if (evt.status == osEventMessage)
