@@ -256,10 +256,7 @@ void StartTask_ReadSensor(void const * argument)
 {
   /* USER CODE BEGIN StartTask_ReadSensor */
   SensorData_t sd;
-  float temp = 0.0f, humi = 0.0f;
-  uint8_t parse_ok;
   char buffer[64];
-  uint8_t ret;
   // DHT11_Init(); // ✅DHT11硬件初始化，仅执行一次！！
  
   /* Infinite loop */
