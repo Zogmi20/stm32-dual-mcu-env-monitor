@@ -1,2 +1,19 @@
-.vscode/
-MDK-ARM/
+# 1) 干掉那条把 F407 工程排除掉的规则（只留根目录一份，避免多处规则打架）
+git rm --cached stm32f407/.gitignore
+rm stm32f407/.gitignore
+
+# 2) 清掉 F103 已提交的编译产物和本地配置
+git rm -r --cached stm32f103/MDK-ARM/STM32F103/
+git rm -r --cached stm32f103/MDK-ARM/DebugConfig/
+git rm --cached "stm32f103/MDK-ARM/STM32F103.uvguix.Administrator" \
+                stm32f103/MDK-ARM/startup_stm32f103xb.lst
+
+# 3) 可选：IDE 本地配置
+git rm --cached stm32f103/MDK-ARM/STM32F103.uvoptx
+git rm -r --cached stm32f103/.vscode stm32f407/PYTHON/.idea
+
+# 4) 补上 F407 工程 + 新 README，提交
+git add -A
+git status      # ★确认 stm32f407/MDK-ARM/Project.uvprojx 在待提交里，且没出现在删除列表里
+git commit -m "fix: 补齐 F407 Keil 工程，统一忽略编译产物与本地配置"
+git push
