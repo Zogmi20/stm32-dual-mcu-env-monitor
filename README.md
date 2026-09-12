@@ -10,7 +10,7 @@
 - **存储**：SD 卡 CSV 记录，基于 FATFS 文件系统
 - **远传**：RS485 转发，采用 DMA 搬运数据以降低 CPU 占用
 - **守护**：IWDG 看门狗，任一任务卡死自动复位
-- **上位机**：Python 实现运行状态实时可视化
+- **上位机**：Python + matplotlib 绘制温湿度实时曲线
 
 ## 硬件
 
@@ -28,7 +28,7 @@
 
 ### 采集节点（F103，裸机）
 
-DHT11 单总线时序驱动 → 周期读取温湿度 → UART 发送。
+DHT11 单总线时序驱动 → 周期读取温湿度 → UART 发送。程序结构简单，不使用 RTOS。
 
 ### 处理节点（F407，FreeRTOS）
 
@@ -50,49 +50,67 @@ DHT11 单总线时序驱动 → 周期读取温湿度 → UART 发送。
 - **看门狗守护**：各任务周期性向 IWDG 报到，任一任务卡死即自动复位
 - **参数持久化**：运行阈值写入 Flash，掉电不丢失
 
-## 目录结构
+## 仓库结构
+
+两个节点各自是一份独立的 Keil 工程，分别放在对应目录下：
 
 ```
 .
-├── Core/                    # CubeMX 生成的初始化代码与 main
-├── Drivers/                 # STM32 HAL 驱动
-├── BSP/                     # 板级驱动（DHT11 / SD / RS485 / 报警等）
-├── FATFS/                   # FATFS 文件系统
-├── Middlewares/Third_Party/ # FreeRTOS
-├── SYSTEM/                  # 系统层
-├── PYTHON/                  # Python 上位机
-├── MDK-ARM/                 # Keil MDK 工程
-├── Project.ioc              # STM32CubeMX 工程配置
-└── .gitignore
+├── stm32f103/                     # 采集节点（裸机）
+│   ├── Core/                      # CubeMX 初始化代码与 main，含 DHT11 驱动
+│   ├── Drivers/                   # STM32 HAL 驱动
+│   ├── MDK-ARM/                   # Keil 工程（STM32F103.uvprojx）
+│   └── STM32F103.ioc              # CubeMX 工程配置
+├── stm32f407/                     # 处理节点（FreeRTOS）
+│   ├── BSP/                       # 板级驱动（DHT11 / SD / RS485 / 报警等）
+│   ├── Core/                      # CubeMX 初始化代码与 main
+│   ├── Drivers/                   # STM32 HAL 驱动
+│   ├── FATFS/                     # FATFS 文件系统
+│   ├── Middlewares/Third_Party/   # FreeRTOS
+│   ├── SYSTEM/                    # 系统层
+│   ├── PYTHON/                    # Python 上位机（rs485_monitor_plot.py）
+│   ├── MDK-ARM/                   # Keil 工程（Project.uvprojx）
+│   └── Project.ioc                # CubeMX 工程配置
+├── .gitignore
+└── README.md
 ```
 
 ## 编译与运行
 
-1. 用 Keil MDK 打开 `MDK-ARM/` 下的工程文件
-2. 编译并下载至 STM32F407 开发板
-3. 给两节点分别上电，F103 采集经 UART 上报至 F407
-4. F407 上电后 LCD 显示实时数据，可按 PA0 按键调整报警阈值
+**采集节点（stm32f103）**
 
-> 工程配置源文件为 `Project.ioc`，可用 STM32CubeMX 打开查看引脚与外设分配。
+1. Keil MDK 打开 `stm32f103/MDK-ARM/STM32F103.uvprojx`
+2. 编译并下载至 STM32F103 开发板
+3. 上电后驱动 DHT11 周期采集温湿度，经 UART 上报
+
+**处理节点（stm32f407）**
+
+1. Keil MDK 打开 `stm32f407/MDK-ARM/Project.uvprojx`
+2. 编译并下载至 STM32F407 开发板
+3. 两节点分别上电，F407 接收 F103 上报的数据
+4. LCD 显示实时数据，可按 PA0 按键调整报警阈值
+
+> 两个节点的引脚与外设分配分别见 `STM32F103.ioc` 与 `Project.ioc`，可用 STM32CubeMX 打开查看。
 
 ## 上位机
 
-`PYTHON/` 目录下为运行状态实时可视化脚本，通过串口读取下位机上报的数据。
+`stm32f407/PYTHON/rs485_monitor_plot.py` 通过串口读取下位机转发的数据，用双 Y 轴实时曲线显示温度与湿度。
 
 ```bash
-pip install pyserial
-python PYTHON/<主脚本名>.py
+pip install pyserial matplotlib
+python stm32f407/PYTHON/rs485_monitor_plot.py
 ```
 
-<!-- 待补：确认脚本文件名与依赖包，若有 matplotlib / pyqtgraph 请一并列出 -->
+运行前按实际接线修改脚本开头的两个参数：
+
+```python
+SERIAL_PORT = 'COM9'     # 串口号
+BAUDRATE    = 115200     # 波特率，需与下位机一致
+```
+
+脚本按 `T:25.3,H:60.5` 的格式解析每一行上报，窗口内保留最近 100 个采样点（`MAX_POINTS`）滚动刷新。
 
 ## 说明
 
 - 本项目为个人学习实践，双 MCU 分工与 FreeRTOS 任务划分均已实际调试通过。
 - 温湿度采样周期、消息队列长度、任务优先级等参数见源码中各任务的配置。
-
-<!-- 待补：
-1. 实物照片或 LCD 显示效果截图（放 docs/ 目录，README 顶部引用）
-2. 若 F103 采集端代码已单独整理，请一并上传或在此说明其位置
-3. 采样周期 / 队列长度 / 任务优先级 / 连续稳定运行时长等实测数据
--->
